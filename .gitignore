@@ -24,6 +24,10 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Worktree và không gian làm việc tạm của công cụ
+.claude/worktrees/
+.superpowers/
+
 # Dữ liệu cục bộ
 *.sqlite3
 /tmp/
