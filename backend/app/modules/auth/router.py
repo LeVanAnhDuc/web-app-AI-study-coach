@@ -8,7 +8,7 @@ from app.db import get_session
 from app.modules.auth import service
 from app.modules.auth.deps import get_current_user
 from app.modules.auth.models import User
-from app.modules.auth.schemas import LoginIn, RegisterIn, TokenPair, UserOut
+from app.modules.auth.schemas import LoginIn, RefreshIn, RegisterIn, TokenPair, UserOut
 from app.security import create_access_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -42,10 +42,32 @@ async def login(
             detail="Email hoặc mật khẩu không đúng.",
         ) from None
 
+    refresh_raw = await service.issue_refresh_token(session, user)
     settings = get_settings()
     return TokenPair(
         access_token=create_access_token(user.id, datetime.now(UTC)),
-        refresh_token="",
+        refresh_token=refresh_raw,
+        expires_in=settings.jwt_access_ttl_seconds,
+    )
+
+
+@router.post("/refresh", response_model=TokenPair)
+async def refresh(
+    payload: RefreshIn,
+    session: AsyncSession = Depends(get_session),
+) -> TokenPair:
+    try:
+        user, new_refresh = await service.rotate_refresh_token(session, payload.refresh_token)
+    except service.InvalidRefreshToken:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Phiên đăng nhập đã hết hiệu lực. Đăng nhập lại nhé.",
+        ) from None
+
+    settings = get_settings()
+    return TokenPair(
+        access_token=create_access_token(user.id, datetime.now(UTC)),
+        refresh_token=new_refresh,
         expires_in=settings.jwt_access_ttl_seconds,
     )
 
