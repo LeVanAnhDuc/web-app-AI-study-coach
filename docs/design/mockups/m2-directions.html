@@ -1,0 +1,534 @@
+<title>Ba Lộ Trình</title>
+<style>
+/* ─── Vỏ trang (theo theme người xem) ─────────────────────────── */
+:root{
+  --sh-bg:#F0F1F3; --sh-panel:#FFFFFF; --sh-ink:#1A1D24; --sh-mute:#5C6470;
+  --sh-line:#D5D8DE; --sh-accent:#2C5D8F; --sh-chip:#E7EAEF;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --sh-bg:#14171C; --sh-panel:#1C2027; --sh-ink:#E6E9EE; --sh-mute:#98A1AE;
+    --sh-line:#2C323B; --sh-accent:#7EB0E0; --sh-chip:#262C35;
+  }
+}
+:root[data-theme="dark"]{
+  --sh-bg:#14171C; --sh-panel:#1C2027; --sh-ink:#E6E9EE; --sh-mute:#98A1AE;
+  --sh-line:#2C323B; --sh-accent:#7EB0E0; --sh-chip:#262C35;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--sh-bg); color:var(--sh-ink);
+  font:16px/1.6 "Segoe UI", Tahoma, sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:40px 20px 80px}
+
+.masthead{display:flex; flex-direction:column; gap:14px; margin-bottom:36px}
+.eyebrow{
+  font:600 11px/1 Consolas, "Courier New", monospace; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--sh-mute);
+}
+.masthead h1{margin:0; font-size:clamp(28px,4.6vw,40px); line-height:1.12; letter-spacing:-.02em; text-wrap:balance}
+.masthead p{margin:0; max-width:62ch; color:var(--sh-mute)}
+
+.tabs{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 8px; padding:0; list-style:none}
+.tab{
+  appearance:none; cursor:pointer; font:inherit; font-weight:600;
+  padding:10px 16px; border-radius:2px; border:1px solid var(--sh-line);
+  background:var(--sh-panel); color:var(--sh-ink);
+}
+.tab:hover{border-color:var(--sh-accent)}
+.tab:focus-visible{outline:2px solid var(--sh-accent); outline-offset:2px}
+.tab[aria-selected="true"]{background:var(--sh-accent); border-color:var(--sh-accent); color:#fff}
+
+.tokens{
+  display:flex; flex-wrap:wrap; gap:18px; align-items:center;
+  padding:14px 16px; margin:16px 0 28px;
+  background:var(--sh-panel); border:1px solid var(--sh-line); border-radius:2px;
+  font-size:13px; color:var(--sh-mute);
+}
+.swatches{display:flex; gap:6px}
+.sw{width:22px; height:22px; border-radius:2px; border:1px solid rgba(0,0,0,.18)}
+.tokens b{color:var(--sh-ink); font-weight:600}
+
+.frames{display:flex; flex-direction:column; gap:34px}
+.cap{
+  display:flex; align-items:baseline; gap:10px; margin-bottom:10px;
+  font:600 12px/1.4 Consolas, "Courier New", monospace;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--sh-mute);
+}
+.cap span{font-family:"Segoe UI",Tahoma,sans-serif; letter-spacing:0; text-transform:none; font-weight:400}
+.frame{border:1px solid var(--sh-line); border-radius:3px; overflow:hidden}
+
+.note{
+  margin-top:30px; padding:16px 18px; border-left:3px solid var(--sh-accent);
+  background:var(--sh-panel); color:var(--sh-mute); font-size:14.5px;
+}
+.note b{color:var(--sh-ink)}
+[hidden]{display:none !important}
+
+/* ═══ HƯỚNG A — VỞ Ô LY ═══════════════════════════════════════ */
+#dir-a .screen{
+  --pa-paper:#FBFBF6; --pa-grid:#CBDDE2; --pa-ink:#17232F; --pa-red:#C8322E;
+  --pa-pencil:#6E7A85; --pa-wash:#F6E7A8; --pa-rule:#DCE4E6;
+  background:var(--pa-paper); color:var(--pa-ink);
+  background-image:linear-gradient(var(--pa-grid) 1px, transparent 1px),
+                   linear-gradient(90deg, var(--pa-grid) 1px, transparent 1px);
+  background-size:24px 24px; padding:32px 28px;
+  font-family:"Segoe UI", Tahoma, sans-serif;
+}
+#dir-a .hd{font-family:Cambria, Georgia, "Times New Roman", serif}
+#dir-a .k{
+  font:600 11px/1 Consolas,monospace; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--pa-pencil);
+}
+#dir-a h2{margin:6px 0 4px; font-size:29px; line-height:1.15; letter-spacing:-.01em}
+#dir-a .sub{margin:0 0 24px; color:var(--pa-pencil); font-size:14.5px}
+#dir-a .quote{
+  border-left:3px solid var(--pa-wash); background:rgba(246,231,168,.32);
+  padding:10px 14px; margin:0 0 24px; font-size:15px;
+}
+#dir-a .flds{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:0 28px}
+#dir-a .fld{border-bottom:1px solid var(--pa-ink); padding:20px 0 6px; position:relative}
+#dir-a .fld .k{position:absolute; top:2px; left:0}
+#dir-a .fld .v{font-family:Cambria,Georgia,serif; font-size:19px}
+#dir-a .btn{
+  margin-top:26px; display:inline-block; background:var(--pa-ink); color:var(--pa-paper);
+  padding:12px 22px; font-weight:600; font-size:15px; border-radius:2px;
+}
+#dir-a .qmeta{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:18px}
+#dir-a .bar{height:6px; background:#E4EAEC; margin-bottom:26px}
+#dir-a .bar i{display:block; height:100%; width:50%; background:var(--pa-ink)}
+#dir-a .qtext{font-family:Cambria,Georgia,serif; font-size:22px; line-height:1.4; margin:0 0 20px}
+#dir-a .opts{display:flex; flex-direction:column; gap:10px}
+#dir-a .opt{
+  display:flex; gap:12px; align-items:flex-start; padding:13px 15px;
+  background:#fff; border:1px solid var(--pa-rule); border-radius:2px; font-size:15px;
+}
+#dir-a .opt b{font-family:Consolas,monospace; color:var(--pa-pencil); font-weight:600}
+#dir-a .opt.on{border-color:var(--pa-ink); box-shadow:inset 0 0 0 1px var(--pa-ink)}
+#dir-a .opt.on b{color:var(--pa-ink)}
+#dir-a .mod{margin-bottom:26px}
+#dir-a .modhd{display:flex; align-items:baseline; gap:12px; border-bottom:2px solid var(--pa-ink); padding-bottom:6px; margin-bottom:12px}
+#dir-a .modhd h3{margin:0; font-family:Cambria,Georgia,serif; font-size:19px}
+#dir-a .modhd em{margin-left:auto; font-style:normal; font-size:12.5px; color:var(--pa-pencil)}
+#dir-a .row{display:flex; gap:14px; align-items:baseline; padding:9px 0; border-bottom:1px dotted var(--pa-rule); font-size:15px}
+#dir-a .row .n{font-family:Consolas,monospace; font-size:13px; color:var(--pa-pencil); min-width:26px}
+#dir-a .row .t{flex:1}
+#dir-a .row .mins{font-family:Consolas,monospace; font-size:12.5px; color:var(--pa-pencil)}
+#dir-a .row.done .t{color:var(--pa-pencil); text-decoration:line-through; text-decoration-color:var(--pa-pencil)}
+#dir-a .row.now{background:rgba(246,231,168,.45); margin:0 -8px; padding-left:8px; padding-right:8px}
+#dir-a .ins{position:relative; margin:14px 0 6px; padding:14px 16px; border:2px solid var(--pa-red); border-radius:2px; background:#fff}
+#dir-a .ins .tag{
+  position:absolute; top:-10px; left:12px; background:var(--pa-red); color:#fff;
+  font:600 10.5px/1 Consolas,monospace; letter-spacing:.1em; padding:4px 8px; text-transform:uppercase;
+}
+#dir-a .ins .t{font-family:Cambria,Georgia,serif; font-size:17px; margin-bottom:4px}
+#dir-a .ins .why{color:var(--pa-red); font-size:14px}
+#dir-a .marg{display:flex; align-items:center; gap:8px; color:var(--pa-red); font-size:13.5px; margin-top:10px}
+
+/* ═══ HƯỚNG B — BẢNG GIỜ ══════════════════════════════════════ */
+#dir-b .screen{
+  --pb-bg:#0F1822; --pb-panel:#17222E; --pb-line:#263444; --pb-ink:#DCE5EC;
+  --pb-mute:#7E8C9A; --pb-amber:#E8A33D; --pb-cyan:#4FC3D4;
+  background:var(--pb-bg); color:var(--pb-ink); padding:30px 28px;
+  font-family:"Segoe UI", Tahoma, sans-serif;
+}
+#dir-b .k{font:600 10.5px/1 Consolas,monospace; letter-spacing:.18em; text-transform:uppercase; color:var(--pb-mute)}
+#dir-b h2{margin:8px 0 6px; font-size:27px; letter-spacing:-.015em; line-height:1.15}
+#dir-b .sub{margin:0 0 24px; color:var(--pb-mute); font-size:14.5px}
+#dir-b .echo{
+  background:var(--pb-panel); border-left:3px solid var(--pb-amber);
+  padding:11px 14px; margin-bottom:22px; font-size:14.5px; color:var(--pb-ink);
+}
+#dir-b .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1px; background:var(--pb-line); border:1px solid var(--pb-line)}
+#dir-b .cell{background:var(--pb-panel); padding:13px 15px}
+#dir-b .cell .v{font:600 17px/1.3 Consolas,monospace; color:var(--pb-amber); margin-top:5px; font-variant-numeric:tabular-nums}
+#dir-b .btn{margin-top:22px; display:inline-block; background:var(--pb-amber); color:#0F1822; padding:12px 22px; font-weight:700; font-size:15px; border-radius:2px}
+#dir-b .qmeta{display:flex; justify-content:space-between; font:600 12px/1 Consolas,monospace; color:var(--pb-mute); margin-bottom:10px; letter-spacing:.08em}
+#dir-b .bar{height:3px; background:var(--pb-line); margin-bottom:24px}
+#dir-b .bar i{display:block; height:100%; width:50%; background:var(--pb-cyan)}
+#dir-b .qtext{font-size:21px; line-height:1.4; margin:0 0 20px; letter-spacing:-.01em}
+#dir-b .opts{display:flex; flex-direction:column; gap:1px; background:var(--pb-line); border:1px solid var(--pb-line)}
+#dir-b .opt{display:flex; gap:14px; background:var(--pb-panel); padding:14px 16px; font-size:15px; align-items:flex-start}
+#dir-b .opt b{font:700 13px/1.5 Consolas,monospace; color:var(--pb-mute)}
+#dir-b .opt.on{background:#1E2E3D}
+#dir-b .opt.on b{color:var(--pb-cyan)}
+#dir-b .board{border:1px solid var(--pb-line)}
+#dir-b .bhd,#dir-b .brow{display:grid; grid-template-columns:52px 1fr 96px 108px; gap:14px; align-items:center; padding:11px 16px}
+#dir-b .bhd{
+  background:#0B1219; font:600 10.5px/1 Consolas,monospace; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--pb-mute); border-bottom:1px solid var(--pb-line);
+}
+#dir-b .brow{background:var(--pb-panel); border-bottom:1px solid var(--pb-line); font-size:15px}
+#dir-b .brow .no{font:600 13px/1 Consolas,monospace; color:var(--pb-mute); font-variant-numeric:tabular-nums}
+#dir-b .brow .mn{font:13px/1 Consolas,monospace; color:var(--pb-mute); font-variant-numeric:tabular-nums}
+#dir-b .st{font:600 10.5px/1 Consolas,monospace; letter-spacing:.1em; text-transform:uppercase; padding:5px 8px; text-align:center; border-radius:2px}
+#dir-b .st.done{color:var(--pb-mute); border:1px solid var(--pb-line)}
+#dir-b .st.now{color:#0F1822; background:var(--pb-amber)}
+#dir-b .st.wait{color:var(--pb-mute); border:1px solid var(--pb-line); opacity:.6}
+#dir-b .brow.chg{background:#10262C; border-left:3px solid var(--pb-cyan)}
+#dir-b .st.chg{color:#0F1822; background:var(--pb-cyan)}
+#dir-b .why{
+  grid-column:1/-1; margin-top:8px; padding-top:9px; border-top:1px dashed var(--pb-line);
+  color:var(--pb-cyan); font-size:13.5px;
+}
+#dir-b .sect{
+  background:#0B1219; padding:8px 16px; font:600 10.5px/1 Consolas,monospace;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--pb-mute); border-bottom:1px solid var(--pb-line);
+}
+
+/* ═══ HƯỚNG C — ĐƯỜNG LEO ═════════════════════════════════════ */
+#dir-c .screen{
+  --pc-sky:#F2F7F6; --pc-deep:#123A38; --pc-slope:#2C7A72; --pc-slope2:#8FC4BC;
+  --pc-coral:#E9614C; --pc-sand:#E8D9B5; --pc-mute:#5D7B78; --pc-line:#D3E2DE;
+  background:var(--pc-sky); color:var(--pc-deep); padding:32px 28px;
+  font-family:"Segoe UI", Tahoma, sans-serif;
+}
+#dir-c .hd{font-family:Candara, "Segoe UI", sans-serif}
+#dir-c .k{font:600 11px/1 Consolas,monospace; letter-spacing:.15em; text-transform:uppercase; color:var(--pc-mute)}
+#dir-c h2{margin:8px 0 6px; font-family:Candara,"Segoe UI",sans-serif; font-size:31px; line-height:1.12; letter-spacing:-.01em}
+#dir-c .sub{margin:0 0 24px; color:var(--pc-mute); font-size:14.5px}
+#dir-c .echo{background:#fff; border:1px solid var(--pc-line); border-radius:10px; padding:13px 16px; margin-bottom:22px; font-size:15px}
+#dir-c .flds{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px}
+#dir-c .fld{background:#fff; border:1px solid var(--pc-line); border-radius:10px; padding:13px 16px}
+#dir-c .fld .v{font-family:Candara,"Segoe UI",sans-serif; font-size:20px; margin-top:5px}
+#dir-c .btn{margin-top:24px; display:inline-block; background:var(--pc-slope); color:#fff; padding:13px 24px; font-weight:600; font-size:15px; border-radius:24px}
+#dir-c .qmeta{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:13px; color:var(--pc-mute)}
+#dir-c .dots{display:flex; gap:6px}
+#dir-c .dot{width:9px; height:9px; border-radius:50%; background:var(--pc-line)}
+#dir-c .dot.on{background:var(--pc-slope)}
+#dir-c .qtext{font-family:Candara,"Segoe UI",sans-serif; font-size:24px; line-height:1.35; margin:0 0 20px}
+#dir-c .opts{display:flex; flex-direction:column; gap:9px}
+#dir-c .opt{display:flex; gap:12px; align-items:flex-start; background:#fff; border:1px solid var(--pc-line); border-radius:10px; padding:14px 16px; font-size:15px}
+#dir-c .opt b{font:600 13px/1.5 Consolas,monospace; color:var(--pc-mute)}
+#dir-c .opt.on{border-color:var(--pc-slope); background:#EAF5F2}
+#dir-c .opt.on b{color:var(--pc-slope)}
+#dir-c .prof{background:#fff; border:1px solid var(--pc-line); border-radius:12px; padding:18px 18px 8px; margin-bottom:22px; overflow-x:auto}
+#dir-c .proflab{display:flex; justify-content:space-between; font-size:12.5px; color:var(--pc-mute); margin-bottom:10px}
+#dir-c svg{display:block; width:100%; min-width:520px; height:auto}
+#dir-c .legend{display:flex; flex-wrap:wrap; gap:16px; font-size:12.5px; color:var(--pc-mute); margin-top:10px}
+#dir-c .legend i{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:6px; vertical-align:-1px}
+#dir-c .stage{margin-bottom:18px}
+#dir-c .stagehd{display:flex; align-items:baseline; gap:10px; margin-bottom:9px}
+#dir-c .stagehd h3{margin:0; font-family:Candara,"Segoe UI",sans-serif; font-size:19px}
+#dir-c .stagehd em{margin-left:auto; font-style:normal; font-size:12.5px; color:var(--pc-mute)}
+#dir-c .step{display:flex; gap:13px; align-items:center; background:#fff; border:1px solid var(--pc-line); border-radius:10px; padding:12px 15px; margin-bottom:7px; font-size:15px}
+#dir-c .pin{width:11px; height:11px; border-radius:50%; background:var(--pc-slope2); flex:none}
+#dir-c .step.done .pin{background:var(--pc-slope)}
+#dir-c .step.done .t{color:var(--pc-mute)}
+#dir-c .step .t{flex:1}
+#dir-c .step .mn{font:12.5px/1 Consolas,monospace; color:var(--pc-mute); font-variant-numeric:tabular-nums}
+#dir-c .step.now{border-color:var(--pc-slope); box-shadow:0 2px 10px rgba(44,122,114,.14)}
+#dir-c .detour{border-color:var(--pc-coral); background:#FDF0ED}
+#dir-c .detour .pin{background:var(--pc-coral)}
+#dir-c .detour .why{display:block; color:var(--pc-coral); font-size:13.5px; margin-top:3px}
+#dir-c .dtag{
+  font:600 10px/1 Consolas,monospace; letter-spacing:.1em; text-transform:uppercase;
+  background:var(--pc-coral); color:#fff; padding:4px 7px; border-radius:3px; flex:none;
+}
+@media (prefers-reduced-motion:reduce){*{animation:none !important; transition:none !important}}
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">AI Study Coach · Mốc M2 · Bản mẫu để chọn hướng</p>
+    <h1>Ba lộ trình cho cùng một màn hình</h1>
+    <p>Ba hướng thẩm mỹ cho ba màn hình đầu tiên: đặt mục tiêu, kiểm tra đầu vào, và lộ trình học. Cùng nội dung, cùng luồng — khác nhau ở vật liệu thị giác. Điểm cần soi kỹ nhất là màn hình lộ trình: chỗ AI chèn thêm bài ôn phải nhìn phát hiểu ngay tại sao.</p>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Chọn hướng thiết kế">
+    <button class="tab" role="tab" id="t-a" aria-controls="dir-a" aria-selected="true">A · Vở ô ly</button>
+    <button class="tab" role="tab" id="t-b" aria-controls="dir-b" aria-selected="false">B · Bảng giờ</button>
+    <button class="tab" role="tab" id="t-c" aria-controls="dir-c" aria-selected="false">C · Đường leo</button>
+  </div>
+
+  <!-- ══════════════ A ══════════════ -->
+  <section id="dir-a" role="tabpanel" aria-labelledby="t-a">
+    <div class="tokens">
+      <span class="swatches"><i class="sw" style="background:#FBFBF6"></i><i class="sw" style="background:#CBDDE2"></i><i class="sw" style="background:#17232F"></i><i class="sw" style="background:#C8322E"></i><i class="sw" style="background:#F6E7A8"></i></span>
+      <span><b>Cambria</b> tiêu đề · <b>Segoe UI</b> nội dung · <b>Consolas</b> số liệu</span>
+      <span>Nền giấy kẻ ô ly, lời phê bút đỏ</span>
+    </div>
+
+    <div class="frames">
+      <div>
+        <p class="cap">Màn 1 <span>— Xác nhận mục tiêu AI vừa hiểu</span></p>
+        <div class="frame"><div class="screen">
+          <p class="k">Bước 1 trên 2</p>
+          <h2 class="hd">Mình hiểu đúng chưa?</h2>
+          <p class="sub">Sửa bất kỳ ô nào không khớp. Lộ trình sẽ dựng theo những gì bạn xác nhận ở đây.</p>
+          <p class="quote">“Muốn học React trong 8 tuần, mỗi tuần rảnh khoảng 5 tiếng, hiện tại biết JavaScript cơ bản.”</p>
+          <div class="flds">
+            <div class="fld"><span class="k">Lĩnh vực</span><div class="v">Lập trình web</div></div>
+            <div class="fld"><span class="k">Chủ đề</span><div class="v">React</div></div>
+            <div class="fld"><span class="k">Đang ở mức</span><div class="v">JavaScript cơ bản</div></div>
+            <div class="fld"><span class="k">Muốn đạt</span><div class="v">Tự dựng được app</div></div>
+            <div class="fld"><span class="k">Mỗi tuần</span><div class="v">5 giờ</div></div>
+            <div class="fld"><span class="k">Trong</span><div class="v">8 tuần</div></div>
+          </div>
+          <div class="btn">Xác nhận và làm bài kiểm tra đầu vào</div>
+        </div></div>
+      </div>
+
+      <div>
+        <p class="cap">Màn 2 <span>— Kiểm tra đầu vào, 6 câu</span></p>
+        <div class="frame"><div class="screen">
+          <div class="qmeta"><span class="k">Câu 3 trên 6</span><span class="k">Khoảng 2 phút nữa</span></div>
+          <div class="bar"><i></i></div>
+          <p class="qtext hd">Hàm bên trong vẫn đọc được biến của hàm ngoài sau khi hàm ngoài đã chạy xong. Cơ chế đó tên là gì?</p>
+          <div class="opts">
+            <div class="opt"><b>A</b><span>Hoisting</span></div>
+            <div class="opt on"><b>B</b><span>Closure</span></div>
+            <div class="opt"><b>C</b><span>Prototype chain</span></div>
+            <div class="opt"><b>D</b><span>Chưa biết — bỏ qua câu này</span></div>
+          </div>
+          <div class="btn">Câu tiếp theo</div>
+        </div></div>
+      </div>
+
+      <div>
+        <p class="cap">Màn 3 <span>— Lộ trình, kèm bài AI vừa chèn thêm</span></p>
+        <div class="frame"><div class="screen">
+          <p class="k">React · 8 tuần · 5 giờ mỗi tuần</p>
+          <h2 class="hd">Lộ trình của bạn</h2>
+          <p class="sub">Đã xong 4 trên 26 bài. Lộ trình tự đổi khi kết quả làm bài cho thấy cần đổi.</p>
+
+          <div class="mod">
+            <div class="modhd"><h3>Phần 1 · Nền JavaScript cho React</h3><em>4 / 5 bài</em></div>
+            <div class="row done"><span class="n">1.1</span><span class="t">Arrow function và this</span><span class="mins">25 ph</span></div>
+            <div class="row done"><span class="n">1.2</span><span class="t">Destructuring và spread</span><span class="mins">20 ph</span></div>
+            <div class="row done"><span class="n">1.3</span><span class="t">Closure và scope</span><span class="mins">30 ph</span></div>
+            <div class="row done"><span class="n">1.4</span><span class="t">Bất đồng bộ với Promise</span><span class="mins">35 ph</span></div>
+
+            <div class="ins">
+              <span class="tag">Vừa thêm</span>
+              <div class="t hd">Closure trong xử lý sự kiện</div>
+              <div class="why">Bạn sai 3 trên 5 câu về closure ở bài 1.3. Học lại phần này trước khi sang state sẽ đỡ vất vả hơn nhiều.</div>
+            </div>
+            <div class="marg">
+              <svg width="28" height="16" viewBox="0 0 28 16" aria-hidden="true"><path d="M2 3c6 0 5 9 12 9 5 0 7-4 7-4" fill="none" stroke="#C8322E" stroke-width="1.6" stroke-linecap="round"/><path d="M18 6l4 2-3 3" fill="none" stroke="#C8322E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>Không muốn học lại? Bạn có thể bỏ qua bài này.</span>
+            </div>
+            <div class="row now"><span class="n">1.5</span><span class="t">Module và import</span><span class="mins">20 ph</span></div>
+          </div>
+
+          <div class="mod">
+            <div class="modhd"><h3>Phần 2 · Component và state</h3><em>0 / 6 bài</em></div>
+            <div class="row"><span class="n">2.1</span><span class="t">JSX và cách React đọc nó</span><span class="mins">30 ph</span></div>
+            <div class="row"><span class="n">2.2</span><span class="t">Props và luồng dữ liệu một chiều</span><span class="mins">25 ph</span></div>
+            <div class="row"><span class="n">2.3</span><span class="t">useState và vòng đời render</span><span class="mins">40 ph</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <p class="note"><b>Rủi ro của hướng này:</b> nền kẻ ô ly gợi “vở học sinh” rất mạnh — đúng tinh thần nhưng có thể làm sản phẩm trông trẻ hơn tuổi người dùng thật. Nếu bạn thích hướng này nhưng thấy nó hơi non, mình giữ bút đỏ và bỏ lưới ô ly, đổi sang giấy trơn.</p>
+  </section>
+
+  <!-- ══════════════ B ══════════════ -->
+  <section id="dir-b" role="tabpanel" aria-labelledby="t-b" hidden>
+    <div class="tokens">
+      <span class="swatches"><i class="sw" style="background:#0F1822"></i><i class="sw" style="background:#17222E"></i><i class="sw" style="background:#DCE5EC"></i><i class="sw" style="background:#E8A33D"></i><i class="sw" style="background:#4FC3D4"></i></span>
+      <span><b>Segoe UI</b> tiêu đề · <b>Consolas</b> dạng bảng</span>
+      <span>Lộ trình là bảng giờ; đổi lịch báo bằng màu lam</span>
+    </div>
+
+    <div class="frames">
+      <div>
+        <p class="cap">Màn 1 <span>— Xác nhận mục tiêu AI vừa hiểu</span></p>
+        <div class="frame"><div class="screen">
+          <p class="k">Bước 1 / 2</p>
+          <h2>Xác nhận trước khi lên lịch</h2>
+          <p class="sub">Sáu thông số này quyết định toàn bộ lịch học. Sửa ô nào không khớp.</p>
+          <p class="echo">“Muốn học React trong 8 tuần, mỗi tuần rảnh khoảng 5 tiếng, hiện tại biết JavaScript cơ bản.”</p>
+          <div class="grid">
+            <div class="cell"><span class="k">Lĩnh vực</span><div class="v">LẬP TRÌNH WEB</div></div>
+            <div class="cell"><span class="k">Chủ đề</span><div class="v">REACT</div></div>
+            <div class="cell"><span class="k">Đang ở mức</span><div class="v">JS CƠ BẢN</div></div>
+            <div class="cell"><span class="k">Muốn đạt</span><div class="v">TỰ DỰNG APP</div></div>
+            <div class="cell"><span class="k">Mỗi tuần</span><div class="v">5 GIỜ</div></div>
+            <div class="cell"><span class="k">Trong</span><div class="v">8 TUẦN</div></div>
+          </div>
+          <div class="btn">Xác nhận và làm bài kiểm tra đầu vào</div>
+        </div></div>
+      </div>
+
+      <div>
+        <p class="cap">Màn 2 <span>— Kiểm tra đầu vào, 6 câu</span></p>
+        <div class="frame"><div class="screen">
+          <div class="qmeta"><span>CÂU 3 / 6</span><span>CÒN ~2 PHÚT</span></div>
+          <div class="bar"><i></i></div>
+          <p class="qtext">Hàm bên trong vẫn đọc được biến của hàm ngoài sau khi hàm ngoài đã chạy xong. Cơ chế đó tên là gì?</p>
+          <div class="opts">
+            <div class="opt"><b>A</b><span>Hoisting</span></div>
+            <div class="opt on"><b>B</b><span>Closure</span></div>
+            <div class="opt"><b>C</b><span>Prototype chain</span></div>
+            <div class="opt"><b>D</b><span>Chưa biết — bỏ qua câu này</span></div>
+          </div>
+          <div class="btn">Câu tiếp theo</div>
+        </div></div>
+      </div>
+
+      <div>
+        <p class="cap">Màn 3 <span>— Lộ trình, kèm bài AI vừa chèn thêm</span></p>
+        <div class="frame"><div class="screen">
+          <p class="k">REACT · 8 TUẦN · 5 GIỜ / TUẦN</p>
+          <h2>Lịch học của bạn</h2>
+          <p class="sub">Đã xong 4 / 26 bài. Lịch tự đổi khi kết quả làm bài cho thấy cần đổi.</p>
+          <div class="board">
+            <div class="sect">Phần 1 — Nền JavaScript cho React · 4 / 5 bài</div>
+            <div class="bhd"><span>Bài</span><span>Nội dung</span><span>Thời lượng</span><span>Trạng thái</span></div>
+            <div class="brow"><span class="no">1.1</span><span>Arrow function và this</span><span class="mn">25 ph</span><span class="st done">Xong</span></div>
+            <div class="brow"><span class="no">1.2</span><span>Destructuring và spread</span><span class="mn">20 ph</span><span class="st done">Xong</span></div>
+            <div class="brow"><span class="no">1.3</span><span>Closure và scope</span><span class="mn">30 ph</span><span class="st done">Xong</span></div>
+            <div class="brow"><span class="no">1.4</span><span>Bất đồng bộ với Promise</span><span class="mn">35 ph</span><span class="st done">Xong</span></div>
+            <div class="brow chg">
+              <span class="no">1.4b</span><span>Closure trong xử lý sự kiện</span><span class="mn">25 ph</span><span class="st chg">Mới thêm</span>
+              <span class="why">Bạn sai 3 / 5 câu về closure ở bài 1.3. Học lại phần này trước khi sang state sẽ đỡ vất vả hơn nhiều. — Có thể bỏ qua.</span>
+            </div>
+            <div class="brow"><span class="no">1.5</span><span>Module và import</span><span class="mn">20 ph</span><span class="st now">Đang học</span></div>
+            <div class="sect">Phần 2 — Component và state · 0 / 6 bài</div>
+            <div class="brow"><span class="no">2.1</span><span>JSX và cách React đọc nó</span><span class="mn">30 ph</span><span class="st wait">Chờ</span></div>
+            <div class="brow"><span class="no">2.2</span><span>Props và luồng dữ liệu một chiều</span><span class="mn">25 ph</span><span class="st wait">Chờ</span></div>
+            <div class="brow"><span class="no">2.3</span><span>useState và vòng đời render</span><span class="mn">40 ph</span><span class="st wait">Chờ</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <p class="note"><b>Rủi ro của hướng này:</b> mật độ cao và chữ dạng bảng khiến lộ trình đọc rất nhanh, nhưng cảm giác gần với công cụ quản trị hơn là bạn đồng hành. Nếu bạn thích độ rõ ràng này nhưng muốn ấm hơn, mình giữ cấu trúc bảng và đổi nền sang sáng.</p>
+  </section>
+
+  <!-- ══════════════ C ══════════════ -->
+  <section id="dir-c" role="tabpanel" aria-labelledby="t-c" hidden>
+    <div class="tokens">
+      <span class="swatches"><i class="sw" style="background:#F2F7F6"></i><i class="sw" style="background:#2C7A72"></i><i class="sw" style="background:#123A38"></i><i class="sw" style="background:#E9614C"></i><i class="sw" style="background:#E8D9B5"></i></span>
+      <span><b>Candara</b> tiêu đề · <b>Segoe UI</b> nội dung · <b>Consolas</b> số liệu</span>
+      <span>Lộ trình vẽ như trắc diện đường leo</span>
+    </div>
+
+    <div class="frames">
+      <div>
+        <p class="cap">Màn 1 <span>— Xác nhận mục tiêu AI vừa hiểu</span></p>
+        <div class="frame"><div class="screen">
+          <p class="k">Bước 1 trên 2</p>
+          <h2>Đích đến của bạn, mình hiểu vậy đúng không?</h2>
+          <p class="sub">Sửa bất kỳ ô nào không khớp. Đường đi sẽ được vẽ theo những gì bạn xác nhận.</p>
+          <p class="echo">“Muốn học React trong 8 tuần, mỗi tuần rảnh khoảng 5 tiếng, hiện tại biết JavaScript cơ bản.”</p>
+          <div class="flds">
+            <div class="fld"><span class="k">Lĩnh vực</span><div class="v">Lập trình web</div></div>
+            <div class="fld"><span class="k">Chủ đề</span><div class="v">React</div></div>
+            <div class="fld"><span class="k">Đang ở mức</span><div class="v">JavaScript cơ bản</div></div>
+            <div class="fld"><span class="k">Muốn đạt</span><div class="v">Tự dựng được app</div></div>
+            <div class="fld"><span class="k">Mỗi tuần</span><div class="v">5 giờ</div></div>
+            <div class="fld"><span class="k">Trong</span><div class="v">8 tuần</div></div>
+          </div>
+          <div class="btn">Xác nhận và làm bài kiểm tra đầu vào</div>
+        </div></div>
+      </div>
+
+      <div>
+        <p class="cap">Màn 2 <span>— Kiểm tra đầu vào, 6 câu</span></p>
+        <div class="frame"><div class="screen">
+          <div class="qmeta">
+            <span>Câu 3 trên 6</span>
+            <span class="dots"><i class="dot on"></i><i class="dot on"></i><i class="dot on"></i><i class="dot"></i><i class="dot"></i><i class="dot"></i></span>
+          </div>
+          <p class="qtext">Hàm bên trong vẫn đọc được biến của hàm ngoài sau khi hàm ngoài đã chạy xong. Cơ chế đó tên là gì?</p>
+          <div class="opts">
+            <div class="opt"><b>A</b><span>Hoisting</span></div>
+            <div class="opt on"><b>B</b><span>Closure</span></div>
+            <div class="opt"><b>C</b><span>Prototype chain</span></div>
+            <div class="opt"><b>D</b><span>Chưa biết — bỏ qua câu này</span></div>
+          </div>
+          <div class="btn">Câu tiếp theo</div>
+        </div></div>
+      </div>
+
+      <div>
+        <p class="cap">Màn 3 <span>— Lộ trình, kèm bài AI vừa chèn thêm</span></p>
+        <div class="frame"><div class="screen">
+          <p class="k">React · 8 tuần · 5 giờ mỗi tuần</p>
+          <h2>Đường đi của bạn</h2>
+          <p class="sub">Đã đi 4 trên 26 chặng. Đường tự vẽ lại khi kết quả làm bài cho thấy cần đi vòng.</p>
+
+          <div class="prof">
+            <div class="proflab"><span>Bắt đầu · JavaScript cơ bản</span><span>Đích · Tự dựng được app</span></div>
+            <svg viewBox="0 0 620 150" role="img" aria-label="Trắc diện đường học: bốn chặng đã đi, một đoạn đi vòng để ôn lại closure, phần còn lại dốc dần lên đích.">
+              <defs>
+                <linearGradient id="cfill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#2C7A72" stop-opacity=".34"/>
+                  <stop offset="1" stop-color="#2C7A72" stop-opacity=".04"/>
+                </linearGradient>
+              </defs>
+              <g stroke="#D3E2DE" stroke-width="1">
+                <line x1="0" y1="35" x2="620" y2="35"/><line x1="0" y1="75" x2="620" y2="75"/><line x1="0" y1="115" x2="620" y2="115"/>
+              </g>
+              <path d="M0 128 L70 120 L140 112 L210 98 L270 106 L330 84 L400 66 L470 50 L540 34 L620 22 L620 150 L0 150 Z" fill="url(#cfill)"/>
+              <path d="M0 128 L70 120 L140 112 L210 98" fill="none" stroke="#2C7A72" stroke-width="3" stroke-linejoin="round"/>
+              <path d="M210 98 L270 106 L330 84" fill="none" stroke="#E9614C" stroke-width="3" stroke-dasharray="7 5" stroke-linejoin="round"/>
+              <path d="M330 84 L400 66 L470 50 L540 34 L620 22" fill="none" stroke="#8FC4BC" stroke-width="3" stroke-linejoin="round"/>
+              <g fill="#2C7A72"><circle cx="70" cy="120" r="5"/><circle cx="140" cy="112" r="5"/><circle cx="210" cy="98" r="5"/></g>
+              <circle cx="270" cy="106" r="7" fill="#E9614C"/>
+              <g fill="#fff" stroke="#8FC4BC" stroke-width="2.5"><circle cx="400" cy="66" r="5"/><circle cx="470" cy="50" r="5"/><circle cx="540" cy="34" r="5"/></g>
+              <circle cx="330" cy="84" r="7" fill="#123A38"/>
+              <text x="270" y="132" text-anchor="middle" font-family="Consolas,monospace" font-size="11" fill="#E9614C">đi vòng ôn lại</text>
+              <text x="330" y="70" text-anchor="middle" font-family="Consolas,monospace" font-size="11" fill="#123A38">bạn ở đây</text>
+            </svg>
+            <div class="legend">
+              <span><i style="background:#2C7A72"></i>Đã đi</span>
+              <span><i style="background:#E9614C"></i>Đoạn ôn lại AI vừa thêm</span>
+              <span><i style="background:#8FC4BC"></i>Còn lại</span>
+              <span>Độ cao = độ khó của chặng</span>
+            </div>
+          </div>
+
+          <div class="stage">
+            <div class="stagehd"><h3>Chặng 1 · Nền JavaScript cho React</h3><em>4 / 5 bài</em></div>
+            <div class="step done"><i class="pin"></i><span class="t">Arrow function và this</span><span class="mn">25 ph</span></div>
+            <div class="step done"><i class="pin"></i><span class="t">Closure và scope</span><span class="mn">30 ph</span></div>
+            <div class="step detour">
+              <span class="dtag">Đi vòng</span>
+              <span class="t">Closure trong xử lý sự kiện
+                <span class="why">Bạn sai 3 trên 5 câu về closure. Ôn lại đoạn này trước khi leo tiếp sẽ đỡ vất vả hơn nhiều — hoặc bỏ qua nếu bạn thấy đã vững.</span>
+              </span>
+              <span class="mn">25 ph</span>
+            </div>
+            <div class="step now"><i class="pin"></i><span class="t">Module và import</span><span class="mn">20 ph</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="stagehd"><h3>Chặng 2 · Component và state</h3><em>0 / 6 bài</em></div>
+            <div class="step"><i class="pin"></i><span class="t">JSX và cách React đọc nó</span><span class="mn">30 ph</span></div>
+            <div class="step"><i class="pin"></i><span class="t">useState và vòng đời render</span><span class="mn">40 ph</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <p class="note"><b>Rủi ro của hướng này:</b> đường cong độ cao là thứ đáng nhớ nhất trong ba hướng, nhưng nó chỉ đọc được khi lộ trình đủ dài. Với mục tiêu ngắn dưới 10 bài, biểu đồ sẽ trông thưa và hơi thừa — cần một biến thể rút gọn cho trường hợp đó.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  function show(id){
+    tabs.forEach(function(t){
+      var on = t.getAttribute('aria-controls') === id;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  tabs.forEach(function(t){
+    t.addEventListener('click', function(){ show(t.getAttribute('aria-controls')); });
+    t.addEventListener('keydown', function(e){
+      var i = tabs.indexOf(t), n = null;
+      if(e.key === 'ArrowRight') n = tabs[(i+1) % tabs.length];
+      if(e.key === 'ArrowLeft')  n = tabs[(i-1+tabs.length) % tabs.length];
+      if(n){ e.preventDefault(); n.focus(); show(n.getAttribute('aria-controls')); }
+    });
+  });
+})();
+</script>
