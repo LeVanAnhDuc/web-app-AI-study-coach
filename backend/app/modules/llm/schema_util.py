@@ -21,7 +21,11 @@ def to_provider_schema(model: type[BaseModel]) -> dict:
 
 
 def _noi_tuyen(node: Any, defs: dict) -> Any:
-    """Thay mọi $ref bằng chính định nghĩa nó trỏ tới."""
+    """Thay mọi $ref bằng chính định nghĩa nó trỏ tới.
+
+    Model tự tham chiếu làm hàm này đệ quy vô hạn khi giải quyết $ref.
+    Các model hiện tại không tự tham chiếu nên không có xử lý chu kỳ.
+    """
     if isinstance(node, list):
         return [_noi_tuyen(item, defs) for item in node]
     if not isinstance(node, dict):
@@ -42,7 +46,11 @@ def _noi_tuyen(node: Any, defs: dict) -> Any:
             nhanh = [
                 b for b in node[tu_khoa] if not (isinstance(b, dict) and b.get("type") == "null")
             ]
-            goc = _noi_tuyen(nhanh[0], defs) if nhanh else {"type": "string"}
+            if not nhanh:
+                raise ValueError(
+                    f"Union không có nhánh không null và không thể chuyển đổi: {tu_khoa}"
+                )
+            goc = _noi_tuyen(nhanh[0], defs)
             khac = {k: v for k, v in node.items() if k != tu_khoa}
             return {**goc, **_noi_tuyen(khac, defs)}
 
@@ -50,11 +58,7 @@ def _noi_tuyen(node: Any, defs: dict) -> Any:
 
 
 def _rut_gon(node: Any, parent_key: str | None = None) -> Any:
-    """Bỏ mọi khoá nhà cung cấp không hiểu, ví dụ title, default, $defs.
-
-    Model tự tham chiếu sẽ tạo ra chu kỳ $ref và làm hàm này đệ quy vô hạn.
-    Các model hiện tại không tự tham chiếu nên không cần xử lý chu kỳ.
-    """
+    """Bỏ mọi khoá nhà cung cấp không hiểu, ví dụ title, default, $defs."""
     if isinstance(node, list):
         return [_rut_gon(item, parent_key) for item in node]
     if not isinstance(node, dict):

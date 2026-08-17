@@ -62,3 +62,23 @@ def test_tat_ca_model_trong_registry_co_the_chuyen_doi():
 
     # Verify we actually converted something (7 models have response_model)
     assert converted_count == 7, f"Expected 7 models to convert, got {converted_count}"
+
+
+def test_union_khong_co_nhanh_khong_null_thi_bao_loi():
+    """Union with all null branches should raise ValueError during conversion.
+
+    This cannot occur through normal Pydantic models (no model declares `None | None`),
+    but the function must fail loudly rather than fabricate a wrong schema.
+    """
+    import pytest
+
+    from app.modules.llm.schema_util import _noi_tuyen
+
+    # Hand-built schema with all-null union
+    all_null_union = {
+        "anyOf": [{"type": "null"}, {"type": "null"}],
+        "properties": {},
+    }
+
+    with pytest.raises(ValueError, match="Union không có nhánh không null"):
+        _noi_tuyen(all_null_union, {})
