@@ -1,7 +1,13 @@
 import pytest
 from pydantic import BaseModel
 
-from app.modules.llm.registry import REGISTRY, GradeOut
+from app.modules.llm.registry import (
+    REGISTRY,
+    GradeOut,
+    LessonRef,
+    NormalizedGoal,
+    QuizQuestion,
+)
 from app.modules.llm.types import TaskType
 
 
@@ -44,3 +50,105 @@ def test_model_dau_ra_deu_la_pydantic():
     for spec in REGISTRY.values():
         if spec.response_model is not None:
             assert issubclass(spec.response_model, BaseModel)
+
+
+def test_weekly_minutes_bi_gioi_han_15_2400():
+    with pytest.raises(ValueError):
+        NormalizedGoal(
+            domain="math",
+            topic="algebra",
+            level_from="A1",
+            level_to="A2",
+            weekly_minutes=14,
+            deadline_weeks=None,
+        )
+    with pytest.raises(ValueError):
+        NormalizedGoal(
+            domain="math",
+            topic="algebra",
+            level_from="A1",
+            level_to="A2",
+            weekly_minutes=2401,
+            deadline_weeks=None,
+        )
+    goal = NormalizedGoal(
+        domain="math",
+        topic="algebra",
+        level_from="A1",
+        level_to="A2",
+        weekly_minutes=30,
+        deadline_weeks=None,
+    )
+    assert goal.weekly_minutes == 30
+
+
+def test_deadline_weeks_bi_gioi_han_1_104():
+    with pytest.raises(ValueError):
+        NormalizedGoal(
+            domain="math",
+            topic="algebra",
+            level_from="A1",
+            level_to="A2",
+            weekly_minutes=30,
+            deadline_weeks=0,
+        )
+    with pytest.raises(ValueError):
+        NormalizedGoal(
+            domain="math",
+            topic="algebra",
+            level_from="A1",
+            level_to="A2",
+            weekly_minutes=30,
+            deadline_weeks=105,
+        )
+    goal = NormalizedGoal(
+        domain="math",
+        topic="algebra",
+        level_from="A1",
+        level_to="A2",
+        weekly_minutes=30,
+        deadline_weeks=12,
+    )
+    assert goal.deadline_weeks == 12
+
+
+def test_difficulty_bi_gioi_han_1_5():
+    with pytest.raises(ValueError):
+        QuizQuestion(
+            type="mcq",
+            stem="q",
+            options=["a", "b"],
+            answer="a",
+            explanation="e",
+            concept_tag="c",
+            difficulty=0,
+        )
+    with pytest.raises(ValueError):
+        QuizQuestion(
+            type="mcq",
+            stem="q",
+            options=["a", "b"],
+            answer="a",
+            explanation="e",
+            concept_tag="c",
+            difficulty=6,
+        )
+    q = QuizQuestion(
+        type="mcq",
+        stem="q",
+        options=["a", "b"],
+        answer="a",
+        explanation="e",
+        concept_tag="c",
+        difficulty=3,
+    )
+    assert q.difficulty == 3
+
+
+def test_estimated_minutes_bi_gioi_han_5_180():
+    with pytest.raises(ValueError):
+        LessonRef(title="t", objectives=["o"], concept_tags=["c"], estimated_minutes=4)
+    with pytest.raises(ValueError):
+        LessonRef(title="t", objectives=["o"], concept_tags=["c"], estimated_minutes=181)
+    lesson = LessonRef(title="t", objectives=["o"], concept_tags=["c"], estimated_minutes=45)
+    assert lesson.estimated_minutes == 45

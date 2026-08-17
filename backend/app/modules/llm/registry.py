@@ -77,6 +77,8 @@ _CHUNG = (
     "Không nhắc tới bản thân bạn, không mở đầu bằng lời chào."
 )
 
+_SECTIONS_DESC = "sections là danh sách tiêu đề cấp hai xuất hiện trong body_md, theo đúng thứ tự."
+
 REGISTRY: dict[TaskType, TaskSpec] = {
     TaskType.NORMALIZE_GOAL: TaskSpec(
         task=TaskType.NORMALIZE_GOAL,
@@ -92,9 +94,9 @@ REGISTRY: dict[TaskType, TaskSpec] = {
     TaskType.GENERATE_PLACEMENT: TaskSpec(
         task=TaskType.GENERATE_PLACEMENT,
         system_prompt=(
-            f"{_CHUNG} Nhiệm vụ: soạn 6 câu hỏi đo trình độ hiện tại của người học về "
-            "chủ đề được nêu. Rải đều từ dễ tới khó. Mỗi câu gắn đúng một concept_tag "
-            "dạng slug chữ thường có gạch nối."
+            f"{_CHUNG} Nhiệm vụ: soạn 6 câu hỏi trắc nghiệm bốn lựa chọn đo trình độ hiện tại của người học về "
+            "chủ đề được nêu. Tất cả 6 câu hỏi phải có type=mcq với đúng 4 options. Rải đều từ dễ tới khó. "
+            "Mỗi câu gắn đúng một concept_tag dạng slug chữ thường có gạch nối."
         ),
         response_model=PlacementOut,
         max_output_tokens=2048,
@@ -105,6 +107,7 @@ REGISTRY: dict[TaskType, TaskSpec] = {
         system_prompt=(
             f"{_CHUNG} Nhiệm vụ: dựng khung lộ trình học. Chỉ tiêu đề, mục tiêu và "
             "concept_tags cho từng bài — tuyệt đối không viết nội dung bài học. "
+            "Mỗi module cần có summary mô tả tổng quan nội dung của module đó. "
             "Sắp xếp sao cho bài sau chỉ dùng kiến thức của bài trước. "
             "Tổng estimated_minutes phải khớp với ngân sách thời gian được nêu, "
             "sai lệch không quá 10 phần trăm."
@@ -117,8 +120,7 @@ REGISTRY: dict[TaskType, TaskSpec] = {
         task=TaskType.GENERATE_LESSON,
         system_prompt=(
             f"{_CHUNG} Nhiệm vụ: viết nội dung một bài học bằng Markdown, bám sát các "
-            "mục tiêu được giao. Có ví dụ cụ thể. sections là danh sách tiêu đề cấp hai "
-            "xuất hiện trong body_md, theo đúng thứ tự."
+            "mục tiêu được giao. Có ví dụ cụ thể. {_SECTIONS_DESC}"
         ),
         response_model=LessonContentOut,
         max_output_tokens=8192,
@@ -161,7 +163,7 @@ REGISTRY: dict[TaskType, TaskSpec] = {
         task=TaskType.GENERATE_REMEDIAL_LESSON,
         system_prompt=(
             f"{_CHUNG} Nhiệm vụ: viết một bài ôn ngắn cho đúng một concept mà người học "
-            "vừa làm sai. Đi thẳng vào chỗ hay nhầm, có ví dụ đối chiếu đúng và sai."
+            "vừa làm sai. Đi thẳng vào chỗ hay nhầm, có ví dụ đối chiếu đúng và sai. {_SECTIONS_DESC}"
         ),
         response_model=LessonContentOut,
         max_output_tokens=4096,
