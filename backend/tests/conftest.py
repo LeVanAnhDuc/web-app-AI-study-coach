@@ -34,7 +34,7 @@ _database_url_test = lay_database_url_test()
 kiem_tra_ten_csdl_la_test(_database_url_test)
 os.environ["DATABASE_URL"] = _database_url_test
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/1")
-os.environ.setdefault("JWT_SECRET", "bi-mat-chi-dung-trong-test")
+os.environ.setdefault("JWT_SECRET", "bi-mat-chi-dung-trong-test-hs256")
 
 from collections.abc import AsyncIterator  # noqa: E402
 

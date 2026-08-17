@@ -1,8 +1,10 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 
+from app.config import get_settings
 from app.security import (
     InvalidToken,
     create_access_token,
@@ -47,3 +49,39 @@ def test_token_bi_sua_thi_bao_loi():
     token = create_access_token(uuid.uuid4(), datetime.now(UTC))
     with pytest.raises(InvalidToken):
         decode_access_token(token + "x", datetime.now(UTC))
+
+
+def test_sub_khong_phai_chuoi_thi_bao_loi():
+    settings = get_settings()
+    payload = {
+        "sub": 123,  # sub as integer instead of UUID string
+        "iat": int(datetime.now(UTC).timestamp()),
+        "exp": int((datetime.now(UTC) + timedelta(seconds=900)).timestamp()),
+    }
+    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    with pytest.raises(InvalidToken):
+        decode_access_token(token, datetime.now(UTC))
+
+
+def test_sub_la_none_thi_bao_loi():
+    settings = get_settings()
+    payload = {
+        "sub": None,  # sub as None
+        "iat": int(datetime.now(UTC).timestamp()),
+        "exp": int((datetime.now(UTC) + timedelta(seconds=900)).timestamp()),
+    }
+    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    with pytest.raises(InvalidToken):
+        decode_access_token(token, datetime.now(UTC))
+
+
+def test_exp_khong_phai_so_thi_bao_loi():
+    settings = get_settings()
+    payload = {
+        "sub": str(uuid.uuid4()),
+        "iat": int(datetime.now(UTC).timestamp()),
+        "exp": "not-a-number",  # exp as string instead of timestamp
+    }
+    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    with pytest.raises(InvalidToken):
+        decode_access_token(token, datetime.now(UTC))

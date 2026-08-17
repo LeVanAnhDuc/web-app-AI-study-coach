@@ -49,10 +49,13 @@ def decode_access_token(token: str, now: datetime | None = None) -> uuid.UUID:
     except jwt.PyJWTError as exc:
         raise InvalidToken("Token không hợp lệ") from exc
 
-    if int(payload.get("exp", 0)) <= int(moment.timestamp()):
-        raise InvalidToken("Token đã hết hạn")
+    try:
+        if int(payload.get("exp", 0)) <= int(moment.timestamp()):
+            raise InvalidToken("Token đã hết hạn")
+    except (ValueError, TypeError) as exc:
+        raise InvalidToken("Token không hợp lệ") from exc
 
     try:
         return uuid.UUID(payload["sub"])
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError, AttributeError, TypeError) as exc:
         raise InvalidToken("Token thiếu định danh người dùng") from exc
