@@ -29,7 +29,11 @@ export default function LoginPage() {
       return;
     }
     const data = await res.json().catch(() => ({}));
-    setError(data.detail ?? "Đăng nhập không thành công. Thử lại nhé.");
+    setError(
+      typeof data.detail === "string"
+        ? data.detail
+        : "Đăng nhập không thành công. Thử lại nhé.",
+    );
     setBusy(false);
   }
 

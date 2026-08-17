@@ -30,7 +30,11 @@ export default function RegisterPage() {
       return;
     }
     const data = await res.json().catch(() => ({}));
-    setError(data.detail ?? "Không tạo được tài khoản. Thử lại nhé.");
+    setError(
+      typeof data.detail === "string"
+        ? data.detail
+        : "Không tạo được tài khoản. Thử lại nhé.",
+    );
     setBusy(false);
   }
 
@@ -54,6 +58,7 @@ export default function RegisterPage() {
           name="password"
           type="password"
           minLength={8}
+          maxLength={128}
           required
           style={{ width: "100%" }}
         />
