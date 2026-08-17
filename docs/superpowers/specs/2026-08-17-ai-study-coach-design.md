@@ -372,6 +372,28 @@ Hai ràng buộc thiết kế đặc thù của sản phẩm này, cần thể h
 - **Trạng thái chờ là trạng thái thường xuyên.** Do sinh nội dung bất đồng bộ (§7), màn hình bài học phải có thiết kế cho trạng thái "đang soạn bài" với tiến trình thật — không phải spinner. Bản mẫu phải vẽ cả trạng thái này, không chỉ trạng thái đã có nội dung.
 - **Lý do re-plan phải nhìn thấy được.** Màn hình lộ trình cần chỗ hiển thị `ReplanEvent` sao cho user hiểu ngay tại sao lộ trình đổi (§6). Đây là điểm bán hàng của sản phẩm; nếu bản mẫu không có chỗ cho nó thì thiết kế chưa đạt.
 
+### Hướng thẩm mỹ đã chốt: "Đường leo"
+
+Chốt ngày 2026-08-17 sau khi so ba phương án (bản mẫu: `docs/design/mockups/m2-directions.html`).
+
+Ý tưởng nền: **lộ trình học được vẽ như trắc diện độ cao của một đường leo núi**. Trục ngang là tiến trình, trục dọc là độ khó. Bài AI chèn thêm hiện ra như một **đoạn đi vòng** — người học nhìn thấy lộ trình thay đổi bằng *hình dạng*, không chỉ bằng chữ. Đây là lý do chọn hướng này: adaptive là giá trị cốt lõi của sản phẩm, nên nó phải được thể hiện bằng thị giác chứ không phải một dòng thông báo.
+
+| Token | Giá trị | Vai trò |
+|---|---|---|
+| `sky` | `#F2F7F6` | Nền |
+| `slope` | `#2C7A72` | Chính — đoạn đã đi, nút hành động |
+| `slope-light` | `#8FC4BC` | Đoạn chưa đi |
+| `deep` | `#123A38` | Chữ, vị trí hiện tại |
+| `coral` | `#E9614C` | **Chỉ dùng cho đoạn đi vòng / bài ôn AI chèn thêm** |
+| `sand` | `#E8D9B5` | Nhấn phụ, dùng tiết chế |
+| `line` | `#D3E2DE` | Đường viền, lưới |
+
+Chữ: tiêu đề dùng một face nhân văn (bản mẫu dùng Candara; khi code sẽ chọn webfont tự host gần nhất, có hỗ trợ đầy đủ dấu tiếng Việt), nội dung dùng sans trung tính, số liệu và nhãn dùng monospace với `tabular-nums`.
+
+**Quy tắc màu bắt buộc:** `coral` là màu dành riêng cho việc lộ trình bị thay đổi. Không dùng nó cho lỗi, cảnh báo, hay nhấn mạnh thông thường — nếu dùng lẫn, tín hiệu "lộ trình vừa đổi" mất tác dụng.
+
+**Việc còn nợ của hướng này:** biểu đồ trắc diện chỉ đọc được khi lộ trình đủ dài. Với mục tiêu ngắn dưới 10 bài, cần một **biến thể rút gọn** (bỏ biểu đồ, giữ danh sách chặng và dấu hiệu đi vòng). Phải thiết kế biến thể này trước khi code màn hình lộ trình ở M2.
+
 Nhóm màn hình theo mốc:
 
 | Duyệt UI trước mốc | Màn hình cần bản mẫu |
