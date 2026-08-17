@@ -1,4 +1,9 @@
+import uuid
+from datetime import UTC, datetime
+
 import pytest
+
+from app.security import create_access_token
 
 
 async def _dang_ky(client, email: str, password: str = "mat-khau-du-dai") -> None:
@@ -84,3 +89,13 @@ async def test_me_token_rac_thi_bi_chan(client):
         "/api/auth/me", headers={"Authorization": "Bearer khong-phai-token"}
     )
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_me_token_hop_le_nhung_nguoi_dung_khong_ton_tai_thi_bi_chan(client):
+    # Token được ký hợp lệ (giải mã thành công) nhưng "sub" là một id chưa từng được
+    # tạo trong CSDL — mô phỏng trường hợp user đã bị xóa sau khi token được phát.
+    token = create_access_token(uuid.uuid4(), datetime.now(UTC))
+    response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Bạn cần đăng nhập để tiếp tục."
