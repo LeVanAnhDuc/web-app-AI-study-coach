@@ -152,3 +152,25 @@ def test_estimated_minutes_bi_gioi_han_5_180():
         LessonRef(title="t", objectives=["o"], concept_tags=["c"], estimated_minutes=181)
     lesson = LessonRef(title="t", objectives=["o"], concept_tags=["c"], estimated_minutes=45)
     assert lesson.estimated_minutes == 45
+
+
+def test_khong_co_ten_hang_so_khong_interpolate_trong_prompt():
+    # Kiểm tra rằng không có tên hằng số module bị mất prefix `f` trong prompt
+    # (Nếu quên `f` prefix, tên hằng sẽ xuất hiện như {CONSTANT_NAME} trong prompt)
+    import app.modules.llm.registry as registry_module
+
+    # Lấy danh sách tên hằng số riêng (bắt đầu với underscore)
+    private_constants = {
+        name
+        for name in dir(registry_module)
+        if name.startswith("_")
+        and not name.startswith("__")
+        and isinstance(getattr(registry_module, name), str)
+    }
+
+    # Kiểm tra mỗi prompt không chứa tên hằng số (điều đó sẽ chỉ ra missing `f` prefix)
+    for task, spec in REGISTRY.items():
+        for const_name in private_constants:
+            assert const_name not in spec.system_prompt, (
+                f"Prompt của {task.value} chứa tên hằng số '{const_name}' (có thể lỗi prefix `f`)"
+            )

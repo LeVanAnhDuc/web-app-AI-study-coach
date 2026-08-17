@@ -120,7 +120,7 @@ REGISTRY: dict[TaskType, TaskSpec] = {
         task=TaskType.GENERATE_LESSON,
         system_prompt=(
             f"{_CHUNG} Nhiệm vụ: viết nội dung một bài học bằng Markdown, bám sát các "
-            "mục tiêu được giao. Có ví dụ cụ thể. {_SECTIONS_DESC}"
+            f"mục tiêu được giao. Có ví dụ cụ thể. {_SECTIONS_DESC}"
         ),
         response_model=LessonContentOut,
         max_output_tokens=8192,
@@ -163,7 +163,7 @@ REGISTRY: dict[TaskType, TaskSpec] = {
         task=TaskType.GENERATE_REMEDIAL_LESSON,
         system_prompt=(
             f"{_CHUNG} Nhiệm vụ: viết một bài ôn ngắn cho đúng một concept mà người học "
-            "vừa làm sai. Đi thẳng vào chỗ hay nhầm, có ví dụ đối chiếu đúng và sai. {_SECTIONS_DESC}"
+            f"vừa làm sai. Đi thẳng vào chỗ hay nhầm, có ví dụ đối chiếu đúng và sai. {_SECTIONS_DESC}"
         ),
         response_model=LessonContentOut,
         max_output_tokens=4096,
