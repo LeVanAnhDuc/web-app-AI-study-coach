@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -67,20 +68,30 @@ async def test_token_moi_van_dung_duoc_de_goi_me(client):
 
 
 @pytest.mark.asyncio
-async def test_dung_lai_token_dong_thoi_bi_tu_choi(client):
-    # Không thể tạo race điều kiện thật một cách xác định trong test, nên mô phỏng
-    # kết quả tương đương: xoay vòng thành công một lần, rồi trình lại đúng token gốc
-    # ban đầu lần thứ hai — giống hệt trường hợp hai request đồng thời cùng dùng một
-    # refresh token, chỉ có một request được chấp nhận.
+async def test_hai_request_dong_thoi_dung_chung_token_chi_mot_thanh_cong(client):
+    # Test này tồn tại để chứng minh việc thu hồi là NGUYÊN TỬ ở tầng CSDL: bắn hai
+    # request /refresh thật sự đồng thời (asyncio.gather) cùng dùng một refresh token
+    # vào cùng một Postgres. Nếu revoke bị lùi lại thành kiểu đọc-rồi-ghi (check rồi mới
+    # UPDATE) như bản nháp ban đầu của task, cả hai coroutine có thể cùng đọc thấy token
+    # chưa bị thu hồi và cùng thành công — test này sẽ thất bại (2 status 200 thay vì
+    # đúng một 200 và một 401). Đừng nhầm với test tuần tự phía trên: test đó chỉ chứng
+    # minh việc dùng lại token cũ bị chặn, không chứng minh gì về tính nguyên tử.
     tokens = await _dang_nhap(client, "rf5@vidu.vn")
     original = tokens["refresh_token"]
 
-    first = await client.post("/api/auth/refresh", json={"refresh_token": original})
-    assert first.status_code == 200
+    responses = await asyncio.gather(
+        client.post("/api/auth/refresh", json={"refresh_token": original}),
+        client.post("/api/auth/refresh", json={"refresh_token": original}),
+        return_exceptions=False,
+    )
 
-    second = await client.post("/api/auth/refresh", json={"refresh_token": original})
-    assert second.status_code == 401
-    assert second.json()["detail"] == "Phiên đăng nhập đã hết hiệu lực. Đăng nhập lại nhé."
+    statuses = sorted(response.status_code for response in responses)
+    assert statuses == [200, 401]
+
+    thanh_cong = next(r for r in responses if r.status_code == 200)
+    that_bai = next(r for r in responses if r.status_code == 401)
+    assert that_bai.json()["detail"] == "Phiên đăng nhập đã hết hiệu lực. Đăng nhập lại nhé."
+    assert thanh_cong.json()["refresh_token"] != original
 
 
 @pytest.mark.asyncio
