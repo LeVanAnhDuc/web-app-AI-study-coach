@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 from app.modules.llm.providers.base import Provider
@@ -68,7 +69,7 @@ class FixtureProvider:
                 {
                     "task": spec.task.value,
                     "text": text,
-                    "usage": usage.__dict__,
+                    "usage": asdict(usage),
                 },
                 ensure_ascii=False,
                 indent=2,

@@ -1,7 +1,7 @@
 import pytest
 
 from app.modules.llm.fixtures import FixtureMissing, FixtureProvider, fixture_key
-from app.modules.llm.types import CallSpec, ProviderUnavailable, TaskType
+from app.modules.llm.types import Capability, CallSpec, ProviderUnavailable, TaskType
 from tests.llm.fakes import FakeProvider
 
 
@@ -26,6 +26,13 @@ def test_khoa_doi_khi_prompt_doi():
 
 def test_khoa_doi_khi_model_doi():
     assert fixture_key("gemini", "m1", _spec()) != fixture_key("gemini", "m2", _spec())
+
+
+def test_khoa_doi_khi_ten_provider_doi_dung_prompt():
+    # Hai nha cung cap khac nhau nhung cung mot prompt phai co khoa fixture
+    # khac nhau, neu khong ban phat lai cua Gemini co the tra ve dung ket qua
+    # da ghi cho Groq.
+    assert fixture_key("gemini", "m1", _spec()) != fixture_key("groq", "m1", _spec())
 
 
 @pytest.mark.asyncio
@@ -94,3 +101,14 @@ async def test_phat_lai_giu_nguyen_usage_qua_vong_ghi_doc(tmp_path):
     assert usage_phat_lai.model == usage_goc.model
     assert usage_phat_lai.input_tokens == usage_goc.input_tokens
     assert usage_phat_lai.output_tokens == usage_goc.output_tokens
+
+
+def test_fixture_provider_ke_thua_thuoc_tinh_tu_provider_ben_trong(tmp_path):
+    inner = FakeProvider(
+        name="groq", model="llama-3", capabilities=frozenset({Capability.STREAMING})
+    )
+    wrapped = FixtureProvider(inner, mode="off", directory=tmp_path)
+
+    assert wrapped.name == inner.name
+    assert wrapped.model == inner.model
+    assert wrapped.capabilities == inner.capabilities
