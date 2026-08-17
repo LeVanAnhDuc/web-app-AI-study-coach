@@ -18,10 +18,13 @@ def kiem_tra_ten_csdl_la_test(database_url: str) -> None:
     kiểm thử độc lập mà không đụng tới bất kỳ CSDL thật nào.
     """
     ten_csdl = urlsplit(database_url).path.lstrip("/")
-    assert ten_csdl.endswith("_test"), (
-        f"Từ chối chạy test trên CSDL '{ten_csdl}': tên CSDL dùng cho test phải kết thúc "
-        "bằng '_test' để tránh xóa nhầm dữ liệu phát triển."
-    )
+    if not ten_csdl.endswith("_test"):
+        # raise thay vì assert: cơ chế này là lá chắn duy nhất trước khi drop_all
+        # chạy, nên không được phép bị vô hiệu hóa bởi -O / PYTHONOPTIMIZE=1.
+        raise RuntimeError(
+            f"Từ chối chạy test trên CSDL '{ten_csdl}': tên CSDL dùng cho test phải kết thúc "
+            "bằng '_test' để tránh xóa nhầm dữ liệu phát triển."
+        )
 
 
 # Không dùng setdefault: DATABASE_URL luôn được gán từ TEST_DATABASE_URL (hoặc giá trị
@@ -45,13 +48,16 @@ from app.main import app  # noqa: E402
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def tao_bang() -> AsyncIterator[None]:
-    # Kiểm tra lại ngay trước khi drop_all: đây là hành động phá hủy dữ liệu duy nhất
-    # trong fixture, nên assert này không được phép bị bỏ qua trong bất kỳ trường hợp nào.
-    kiem_tra_ten_csdl_la_test(os.environ["DATABASE_URL"])
+    # Kiểm tra lại ngay trước mỗi lần drop_all (setup lẫn teardown): đây là hành động
+    # phá hủy dữ liệu duy nhất trong fixture, nên việc kiểm tra không được phép bị bỏ
+    # qua trong bất kỳ trường hợp nào — kể cả khi DATABASE_URL bị thay đổi giữa lúc
+    # setup và teardown chạy.
+    kiem_tra_ten_csdl_la_test(os.environ.get("DATABASE_URL", ""))
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
+    kiem_tra_ten_csdl_la_test(os.environ.get("DATABASE_URL", ""))
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
