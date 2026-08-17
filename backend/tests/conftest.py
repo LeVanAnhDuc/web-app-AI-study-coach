@@ -42,6 +42,7 @@ import httpx  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
+import app.modules.auth.models  # noqa: E402,F401  đăng ký bảng vào metadata
 from app.db import Base, engine, session_factory  # noqa: E402
 from app.main import app  # noqa: E402
 
