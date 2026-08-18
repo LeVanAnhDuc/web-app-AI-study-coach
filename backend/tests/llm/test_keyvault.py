@@ -51,9 +51,9 @@ def test_hai_lan_ma_hoa_cung_khoa_ra_hai_ban_ma_khac_nhau():
     a = encrypt_key(goc)
     b = encrypt_key(goc)
     assert a != b
-    # Không chỉ khác toàn bộ chuỗi — 12 byte nonce đầu (base64 hoá ra ký tự đầu)
+    # Không chỉ khác toàn bộ chuỗi — 12 byte nonce (đứng sau 1 byte version)
     # cũng phải khác nhau, để chắc chắn phần khác biệt không chỉ nằm ở đệm cuối.
-    assert base64.b64decode(a)[:12] != base64.b64decode(b)[:12]
+    assert base64.b64decode(a)[1:13] != base64.b64decode(b)[1:13]
 
 
 def test_ban_ma_bi_sua_thi_giai_ma_that_bai():
@@ -163,7 +163,22 @@ def test_khong_nhanh_that_bai_nao_lo_ban_ro_hoac_khoa_goc(monkeypatch):
     except _LOI_KEYVAULT as exc:
         thong_diep.append(str(exc))
 
-    assert len(thong_diep) == 5, "phải thu đủ 5 nhánh thất bại để kiểm tra"
+    # Nhánh 6: plaintext sai kiểu, chính nó bọc sentinel (vd list chứa sentinel).
+    try:
+        encrypt_key([_SENTINEL])
+    except TypeError as exc:
+        thong_diep.append(str(exc))
+
+    # Nhánh 7: blob sai kiểu, chính nó bọc sentinel.
+    try:
+        decrypt_key([_SENTINEL])
+    except DecryptionFailed as exc:
+        thong_diep.append(str(exc))
+
+    # Không coi 5 nhánh gốc là đầy đủ mọi nhánh thất bại có thể có (một sweep
+    # trước đây trong milestone này từng bỏ sót đúng những nhánh mới thêm sau —
+    # xem báo cáo); mỗi khi thêm nhánh thất bại mới, thêm luôn vào đây.
+    assert len(thong_diep) == 7, "phải thu đủ 7 nhánh thất bại để kiểm tra"
     for msg in thong_diep:
         assert _SENTINEL not in msg
 
@@ -173,42 +188,55 @@ def test_khong_nhanh_that_bai_nao_lo_ban_ro_hoac_khoa_goc(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _tach_blob(blob: str) -> tuple[bytes, bytes, bytes]:
-    """Tách blob thành (nonce, thân bản mã, tag). Thư viện cryptography gộp tag
-    16 byte cuối vào ngay sau bản mã, không lưu tách rời — xem docstring keyvault.
+def _tach_blob(blob: str) -> tuple[bytes, bytes, bytes, bytes]:
+    """Tách blob thành (version, nonce, thân bản mã, tag). Thư viện cryptography
+    gộp tag 16 byte cuối vào ngay sau bản mã, không lưu tách rời — xem docstring
+    keyvault.
     """
     raw = base64.b64decode(blob)
-    nonce, phan_con_lai = raw[:12], raw[12:]
+    phien_ban, phan_con_lai = raw[:1], raw[1:]
+    nonce, phan_con_lai = phan_con_lai[:12], phan_con_lai[12:]
     than_ban_ma, tag = phan_con_lai[:-16], phan_con_lai[-16:]
-    return nonce, than_ban_ma, tag
+    return phien_ban, nonce, than_ban_ma, tag
 
 
-def _ghep_lai(nonce: bytes, than_ban_ma: bytes, tag: bytes) -> str:
-    return base64.b64encode(nonce + than_ban_ma + tag).decode()
+def _ghep_lai(phien_ban: bytes, nonce: bytes, than_ban_ma: bytes, tag: bytes) -> str:
+    return base64.b64encode(phien_ban + nonce + than_ban_ma + tag).decode()
 
 
 def test_gia_mao_nonce_thi_giai_ma_that_bai():
     blob = encrypt_key("sk-du-lieu-can-bao-ve")
-    nonce, than_ban_ma, tag = _tach_blob(blob)
+    phien_ban, nonce, than_ban_ma, tag = _tach_blob(blob)
     nonce_hong = bytes([nonce[0] ^ 0xFF]) + nonce[1:]
     with pytest.raises(DecryptionFailed):
-        decrypt_key(_ghep_lai(nonce_hong, than_ban_ma, tag))
+        decrypt_key(_ghep_lai(phien_ban, nonce_hong, than_ban_ma, tag))
 
 
 def test_gia_mao_than_ban_ma_thi_giai_ma_that_bai():
     blob = encrypt_key("sk-du-lieu-can-bao-ve")
-    nonce, than_ban_ma, tag = _tach_blob(blob)
+    phien_ban, nonce, than_ban_ma, tag = _tach_blob(blob)
     than_hong = bytes([than_ban_ma[0] ^ 0xFF]) + than_ban_ma[1:]
     with pytest.raises(DecryptionFailed):
-        decrypt_key(_ghep_lai(nonce, than_hong, tag))
+        decrypt_key(_ghep_lai(phien_ban, nonce, than_hong, tag))
 
 
 def test_gia_mao_tag_thi_giai_ma_that_bai():
     blob = encrypt_key("sk-du-lieu-can-bao-ve")
-    nonce, than_ban_ma, tag = _tach_blob(blob)
+    phien_ban, nonce, than_ban_ma, tag = _tach_blob(blob)
     tag_hong = bytes([tag[0] ^ 0xFF]) + tag[1:]
     with pytest.raises(DecryptionFailed):
-        decrypt_key(_ghep_lai(nonce, than_ban_ma, tag_hong))
+        decrypt_key(_ghep_lai(phien_ban, nonce, than_ban_ma, tag_hong))
+
+
+def test_gia_mao_phien_ban_thi_giai_ma_that_bai():
+    # Byte version hiện tại là 1 — lật sang một giá trị không được hỗ trợ (2)
+    # phải bị từ chối tường minh, KHÔNG được âm thầm coi như v1 và thử giải mã
+    # tiếp (đúng yêu cầu: từ chối version lạ, không rơi qua nhánh cũ).
+    blob = encrypt_key("sk-du-lieu-can-bao-ve")
+    phien_ban, nonce, than_ban_ma, tag = _tach_blob(blob)
+    phien_ban_la = bytes([phien_ban[0] + 1])
+    with pytest.raises(DecryptionFailed):
+        decrypt_key(_ghep_lai(phien_ban_la, nonce, than_ban_ma, tag))
 
 
 def test_sai_khoa_goc_thi_giai_ma_that_bai(monkeypatch):
@@ -217,3 +245,41 @@ def test_sai_khoa_goc_thi_giai_ma_that_bai(monkeypatch):
     get_settings.cache_clear()
     with pytest.raises(DecryptionFailed):
         decrypt_key(blob)
+
+
+# ---------------------------------------------------------------------------
+# Reviewer #2 — đầu vào sai kiểu phải đi qua đúng hợp đồng ngoại lệ đã tài liệu
+# hoá (DecryptionFailed cho decrypt_key, TypeError cho encrypt_key), không được
+# thoát ra ngoài thành TypeError/AttributeError sống chưa được khai báo.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("blob_sai_kieu", [None, 12345, [], {"a": 1}])
+def test_decrypt_key_sai_kieu_nem_decryption_failed(blob_sai_kieu):
+    with pytest.raises(DecryptionFailed):
+        decrypt_key(blob_sai_kieu)
+
+
+@pytest.mark.parametrize("plaintext_sai_kieu", [None, 12345, [], {"a": 1}])
+def test_encrypt_key_sai_kieu_nem_type_error(plaintext_sai_kieu):
+    with pytest.raises(TypeError):
+        encrypt_key(plaintext_sai_kieu)
+
+
+def test_sai_kieu_khong_lo_gia_tri_mang_sentinel():
+    # Đầu vào sai kiểu nhưng chính nó CHỨA sentinel (vd một list bọc chuỗi bí
+    # mật) — thông điệp lỗi chỉ được nêu TÊN KIỂU (list), không được nêu nội
+    # dung của list đó.
+    try:
+        encrypt_key([_SENTINEL])
+    except TypeError as exc:
+        assert _SENTINEL not in str(exc)
+    else:
+        pytest.fail("encrypt_key([...]) phải ném TypeError")
+
+    try:
+        decrypt_key([_SENTINEL])
+    except DecryptionFailed as exc:
+        assert _SENTINEL not in str(exc)
+    else:
+        pytest.fail("decrypt_key([...]) phải ném DecryptionFailed")

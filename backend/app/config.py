@@ -33,10 +33,15 @@ def _kiem_tra_hinh_dang_khoa_goc(gia_tri: str) -> None:
     keyvault thực sự cần khoá.
 
     CỐ Ý không dùng `pydantic.field_validator`: khi validator ném ValueError,
-    Pydantic bọc nó thành ValidationError và CHÈN NGUYÊN VĂN giá trị đầu vào sai
-    vào `str(exc)` (đã kiểm chứng bằng thực nghiệm) — tức là sẽ làm lộ khoá gốc
-    (dù sai hình dạng, vẫn là dữ liệu bí mật) ra traceback/log đầu tiên gặp phải.
-    Viết tay bằng code thường để tự kiểm soát toàn bộ nội dung thông điệp lỗi.
+    Pydantic bọc nó thành ValidationError và CHÈN giá trị đầu vào sai vào
+    `str(exc)` (đã kiểm chứng bằng thực nghiệm — verbatim tới khoảng 44 ký tự,
+    dài hơn thì Pydantic cắt bằng dấu ba chấm ở giữa quá ~50 ký tự). Chú ý: cắt
+    bớt đó vẫn để lộ phần đầu VÀ phần cuối của giá trị — là một rò rỉ MỘT PHẦN,
+    không phải một cách khắc phục, và không nên dựa vào nó để coi là an toàn (một
+    khoá gốc sai hình dạng nhưng ngắn, như trong test của chính module này, vẫn
+    lộ NGUYÊN VĂN vì chưa chạm ngưỡng cắt). Viết tay bằng code thường để tự kiểm
+    soát toàn bộ nội dung thông điệp lỗi, không phụ thuộc hành vi cắt chuỗi của
+    một thư viện ngoài.
     """
     try:
         khoa = base64.b64decode(gia_tri, validate=True)
