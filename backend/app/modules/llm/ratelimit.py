@@ -119,19 +119,38 @@ class TokenBucket:
         self.refill_per_second = refill_per_second
         self._script = redis.register_script(_LUA)
 
-    async def try_acquire(self, tokens: int = 1, now: float | None = None) -> bool:
+    async def try_acquire(
+        self, tokens: int = 1, *, now_override_for_tests: float | None = None
+    ) -> bool:
         """Xin `tokens` token từ thùng, trả về True nếu được cấp.
 
-        `now` chỉ tồn tại để phục vụ test cần một đồng hồ tất định; mã sản phẩm
-        LUÔN gọi hàm này KHÔNG truyền `now` (giữ mặc định None) để script tự hỏi
-        đồng hồ của máy chủ Redis thay vì đồng hồ tiến trình ứng dụng — lý do nằm
-        trong chú thích của _LUA.
+        `now_override_for_tests` CHỈ tồn tại để phục vụ test cần một đồng hồ tất
+        định. Đặt tên để tự cảnh báo, và bắt buộc truyền theo từ khoá (không cho
+        truyền theo vị trí) để không ai vô tình đưa đồng hồ ứng dụng vào đây — mã
+        sản phẩm LUÔN gọi hàm này KHÔNG truyền tham số này (giữ mặc định None) để
+        script tự hỏi đồng hồ của máy chủ Redis thay vì đồng hồ tiến trình ứng
+        dụng — lý do nằm trong chú thích của _LUA. Đây chính là cửa hậu mà Ruling
+        2 cấm: nếu tầng định tuyến (Task 18) lỡ truyền đồng hồ riêng của tiến
+        trình vào đây, lỗi lệch đồng hồ giữa nhiều tiến trình mà thùng này sinh ra
+        để chặn sẽ quay lại — và nó không gây lỗi ồn ào nào, chỉ âm thầm nhân sức
+        chứa lên theo số tiến trình.
 
         Redis không phản hồi được (mất kết nối, timeout...) thì ném
         RateLimiterUnavailable và TỪ CHỐI cấp token (fail closed) — không có
         chuyện coi "không hỏi được" là "còn dư token".
+
+        `tokens` phải dương: một lời gọi xin 0 (hoặc âm) token luôn được cấp vô
+        điều kiện vì phép so sánh sức chứa >= tokens tự nhiên đúng — nếu giá trị
+        này lỡ tính ra từ một cấu hình rỗng hoặc một ánh xạ thiếu khoá, việc giới
+        hạn sẽ âm thầm biến thành vô tác dụng mà không ai biết. Ném ValueError
+        ngay để báo đây là lỗi lập trình của bên gọi, không phải một tình huống
+        runtime của provider — vì vậy đây không phải là LLMError.
         """
-        gio_ghi_de = _KHONG_GHI_DE_GIO if now is None else repr(now)
+        if tokens <= 0:
+            raise ValueError(f"tokens phải là số dương, nhận được {tokens}")
+        gio_ghi_de = (
+            _KHONG_GHI_DE_GIO if now_override_for_tests is None else repr(now_override_for_tests)
+        )
         try:
             cho_phep = await self._script(
                 keys=[self._key],

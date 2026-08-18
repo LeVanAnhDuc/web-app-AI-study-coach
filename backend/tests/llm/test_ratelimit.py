@@ -14,45 +14,45 @@ def redis():
 @pytest.mark.asyncio
 async def test_lay_duoc_token_khi_thung_con_day(redis):
     bucket = TokenBucket(redis, key="t1", capacity=3, refill_per_second=0.0)
-    assert await bucket.try_acquire(now=0.0) is True
-    assert await bucket.try_acquire(now=0.0) is True
-    assert await bucket.try_acquire(now=0.0) is True
+    assert await bucket.try_acquire(now_override_for_tests=0.0) is True
+    assert await bucket.try_acquire(now_override_for_tests=0.0) is True
+    assert await bucket.try_acquire(now_override_for_tests=0.0) is True
 
 
 @pytest.mark.asyncio
 async def test_het_token_thi_bi_tu_choi(redis):
     bucket = TokenBucket(redis, key="t2", capacity=2, refill_per_second=0.0)
-    await bucket.try_acquire(now=0.0)
-    await bucket.try_acquire(now=0.0)
-    assert await bucket.try_acquire(now=0.0) is False
+    await bucket.try_acquire(now_override_for_tests=0.0)
+    await bucket.try_acquire(now_override_for_tests=0.0)
+    assert await bucket.try_acquire(now_override_for_tests=0.0) is False
 
 
 @pytest.mark.asyncio
 async def test_token_hoi_lai_theo_thoi_gian(redis):
     bucket = TokenBucket(redis, key="t3", capacity=2, refill_per_second=1.0)
-    await bucket.try_acquire(now=0.0)
-    await bucket.try_acquire(now=0.0)
-    assert await bucket.try_acquire(now=0.0) is False
-    assert await bucket.try_acquire(now=1.0) is True
+    await bucket.try_acquire(now_override_for_tests=0.0)
+    await bucket.try_acquire(now_override_for_tests=0.0)
+    assert await bucket.try_acquire(now_override_for_tests=0.0) is False
+    assert await bucket.try_acquire(now_override_for_tests=1.0) is True
 
 
 @pytest.mark.asyncio
 async def test_khong_hoi_qua_suc_chua(redis):
     bucket = TokenBucket(redis, key="t4", capacity=2, refill_per_second=1.0)
-    await bucket.try_acquire(now=0.0)
-    await bucket.try_acquire(now=0.0)
-    assert await bucket.try_acquire(now=1000.0) is True
-    assert await bucket.try_acquire(now=1000.0) is True
-    assert await bucket.try_acquire(now=1000.0) is False
+    await bucket.try_acquire(now_override_for_tests=0.0)
+    await bucket.try_acquire(now_override_for_tests=0.0)
+    assert await bucket.try_acquire(now_override_for_tests=1000.0) is True
+    assert await bucket.try_acquire(now_override_for_tests=1000.0) is True
+    assert await bucket.try_acquire(now_override_for_tests=1000.0) is False
 
 
 @pytest.mark.asyncio
 async def test_hai_thung_khac_khoa_thi_doc_lap(redis):
     a = TokenBucket(redis, key="a", capacity=1, refill_per_second=0.0)
     b = TokenBucket(redis, key="b", capacity=1, refill_per_second=0.0)
-    assert await a.try_acquire(now=0.0) is True
-    assert await a.try_acquire(now=0.0) is False
-    assert await b.try_acquire(now=0.0) is True
+    assert await a.try_acquire(now_override_for_tests=0.0) is True
+    assert await a.try_acquire(now_override_for_tests=0.0) is False
+    assert await b.try_acquire(now_override_for_tests=0.0) is True
 
 
 @pytest.mark.asyncio
@@ -69,10 +69,10 @@ async def test_tao_thung_tu_so_request_moi_phut(redis):
 async def test_hai_provider_khac_nhau_co_thung_doc_lap(redis):
     gemini = bucket_for_provider(redis, "gemini", rpm=1)
     groq = bucket_for_provider(redis, "groq", rpm=1)
-    assert await gemini.try_acquire(now=0.0) is True
-    assert await gemini.try_acquire(now=0.0) is False
+    assert await gemini.try_acquire(now_override_for_tests=0.0) is True
+    assert await gemini.try_acquire(now_override_for_tests=0.0) is False
     # groq chưa bị đụng tới, phải còn nguyên sức chứa dù cùng owner mặc định.
-    assert await groq.try_acquire(now=0.0) is True
+    assert await groq.try_acquire(now_override_for_tests=0.0) is True
 
 
 @pytest.mark.asyncio
@@ -80,16 +80,16 @@ async def test_shared_va_byok_cung_provider_co_thung_doc_lap(redis):
     dung_chung = bucket_for_provider(redis, "gemini", rpm=1)
     # owner ở đây mô phỏng một định danh mờ (băm khoá) — KHÔNG phải khoá API gốc.
     rieng_cua_mot_nguoi = bucket_for_provider(redis, "gemini", rpm=1, owner="byok:ab12cd34")
-    assert await dung_chung.try_acquire(now=0.0) is True
-    assert await dung_chung.try_acquire(now=0.0) is False
+    assert await dung_chung.try_acquire(now_override_for_tests=0.0) is True
+    assert await dung_chung.try_acquire(now_override_for_tests=0.0) is False
     # Hạn mức dùng chung đã cạn không được chặn nhầm người dùng khoá riêng.
-    assert await rieng_cua_mot_nguoi.try_acquire(now=0.0) is True
+    assert await rieng_cua_mot_nguoi.try_acquire(now_override_for_tests=0.0) is True
 
 
 @pytest.mark.asyncio
 async def test_khoa_bucket_co_dat_ttl(redis):
     bucket = bucket_for_provider(redis, "gemini", rpm=10)
-    await bucket.try_acquire(now=0.0)
+    await bucket.try_acquire(now_override_for_tests=0.0)
     ttl = await redis.ttl(bucket._key)
     # Phải có TTL dương (không phải -1 "sống mãi mãi", không phải -2 "không tồn tại").
     assert 0 < ttl <= 3600
@@ -121,7 +121,7 @@ async def test_moi_lan_xin_token_chi_phat_dung_mot_lenh_toi_redis(redis):
     # Lần đầu: cache script phía client chưa có, redis-py có thể thử EVALSHA (miss)
     # rồi SCRIPT LOAD rồi EVALSHA — vẫn là một lần thực thi script, không lệnh nào
     # trong số đó là một lệnh đọc/ghi trực tiếp trên dữ liệu thùng token.
-    await bucket.try_acquire(now=0.0)
+    await bucket.try_acquire(now_override_for_tests=0.0)
     for ten_lenh in lenh_da_phat:
         assert ten_lenh in {"EVALSHA", "EVAL", "SCRIPT LOAD"}, (
             f"Phát hiện lệnh rời rạc ngoài script: {ten_lenh}"
@@ -130,7 +130,7 @@ async def test_moi_lan_xin_token_chi_phat_dung_mot_lenh_toi_redis(redis):
     # Lần thứ hai: cache đã ấm, phải đúng MỘT lệnh duy nhất cho toàn bộ việc
     # kiểm-và-trừ token.
     lenh_da_phat.clear()
-    await bucket.try_acquire(now=0.0)
+    await bucket.try_acquire(now_override_for_tests=0.0)
     assert lenh_da_phat == ["EVALSHA"]
 
 
@@ -152,14 +152,14 @@ class _RedisMatKetNoi:
 async def test_redis_khong_hoi_duoc_thi_tu_choi_thay_vi_cho_qua():
     bucket = TokenBucket(_RedisMatKetNoi(), key="x", capacity=10, refill_per_second=1.0)
     with pytest.raises(RateLimiterUnavailable):
-        await bucket.try_acquire(now=0.0)
+        await bucket.try_acquire(now_override_for_tests=0.0)
 
 
 @pytest.mark.asyncio
 async def test_loi_redis_khong_hoi_duoc_la_lop_rieng_khong_gia_lam_vuot_han_muc():
     bucket = TokenBucket(_RedisMatKetNoi(), key="x", capacity=10, refill_per_second=1.0)
     try:
-        await bucket.try_acquire(now=0.0)
+        await bucket.try_acquire(now_override_for_tests=0.0)
     except RateLimiterUnavailable as exc:
         # Là LLMError (thuộc cây ngoại lệ chung) nhưng KHÔNG được đội lốt một trong
         # ba lớp lỗi hạ tầng của TỪNG provider — đội lốt RateLimited sẽ khiến tầng
@@ -186,7 +186,7 @@ async def test_khong_truyen_now_thi_dung_dong_ho_cua_redis_khong_phai_cua_app(re
     đương với việc điều khiển đồng hồ của MÁY CHỦ Redis trong đời thực.
 
     Nếu cài đặt lỡ dùng đồng hồ của tiến trình ứng dụng (vd time.monotonic()) khi
-    now=None thay vì gọi redis.call('TIME'), việc ghi đè time.time() ở đây sẽ
+    now_override_for_tests=None thay vì gọi redis.call('TIME'), việc ghi đè time.time() ở đây sẽ
     không có tác dụng gì và test này thất bại.
     """
     dong_ho = {"gia_tri": 0.0}
@@ -201,3 +201,31 @@ async def test_khong_truyen_now_thi_dung_dong_ho_cua_redis_khong_phai_cua_app(re
 
     dong_ho["gia_tri"] = 5.0
     assert await bucket.try_acquire() is True  # hồi theo đồng hồ Redis đã trôi 5 giây
+
+
+# --- Guard: xin token không dương là lỗi lập trình của bên gọi, không phải một
+# tình huống rate-limit runtime ---
+
+
+@pytest.mark.asyncio
+async def test_xin_khong_qua_mot_token_duong_thi_bao_loi_lap_trinh(redis):
+    """Nếu số token tính ra từ cấu hình lỡ là 0 (config rỗng, ánh xạ thiếu khoá...),
+    phép so sánh sức chứa >= tokens sẽ tự nhiên đúng và cấp vô điều kiện — nghĩa
+    là việc giới hạn âm thầm biến thành vô tác dụng mà không ai biết. Phải từ
+    chối ngay bằng ValueError (lỗi lập trình của bên gọi), không phải bằng một
+    trong các lớp LLMError (không phải một tình huống provider ở runtime)."""
+    bucket = TokenBucket(redis, key="khong-duong", capacity=5, refill_per_second=0.0)
+    with pytest.raises(ValueError):
+        await bucket.try_acquire(0)
+    with pytest.raises(ValueError):
+        await bucket.try_acquire(-1)
+
+
+@pytest.mark.asyncio
+async def test_now_khong_the_truyen_theo_vi_tri(redis):
+    """now_override_for_tests bắt buộc truyền theo từ khoá — chặn việc tầng gọi
+    (vd tầng định tuyến ở Task 18) vô tình đưa đồng hồ ứng dụng vào vị trí thứ
+    hai, tái lập đúng lỗi lệch đồng hồ mà Ruling 2 cấm."""
+    bucket = TokenBucket(redis, key="vi-tri", capacity=5, refill_per_second=0.0)
+    with pytest.raises(TypeError):
+        await bucket.try_acquire(1, 0.0)
