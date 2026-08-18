@@ -129,11 +129,63 @@ async def test_429_thanh_rate_limited_co_retry_after():
 
 
 @pytest.mark.asyncio
-async def test_het_quota_thanh_quota_exhausted():
+async def test_het_quota_theo_ngay_thanh_quota_exhausted():
+    """Ruling 2: chỉ có bằng chứng RÕ RÀNG về giới hạn theo ngày mới coi là hết hạn mức."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(429, json={"error": {"message": "Quota exceeded for quota metric"}})
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "message": (
+                        "Quota exceeded for quota metric "
+                        "'generate_content_free_tier_requests', limit "
+                        "'GenerateRequestsPerDayPerProjectPerModel-FreeTier'"
+                    )
+                }
+            },
+        )
 
     with pytest.raises(QuotaExhausted):
+        await _provider(handler).complete(_spec())
+
+
+@pytest.mark.asyncio
+async def test_429_theo_phut_thanh_rate_limited():
+    """Ruling 2: giới hạn theo phút chỉ là tạm thời, không phải hết hạn mức ngày."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "message": (
+                        "Quota exceeded for quota metric "
+                        "'generate_content_free_tier_requests', limit "
+                        "'GenerateRequestsPerMinutePerProjectPerModel-FreeTier'"
+                    )
+                }
+            },
+        )
+
+    with pytest.raises(RateLimited):
+        await _provider(handler).complete(_spec())
+
+
+@pytest.mark.asyncio
+async def test_429_khong_phan_loai_duoc_mac_dinh_thanh_rate_limited():
+    """Ruling 2: đây là test ghim mặc định bất đối xứng — thân lỗi có chữ "quota"
+    (như mọi 429 của Google) nhưng KHÔNG có bằng chứng theo ngày/theo phút. Code
+    cũ (chỉ xét "quota" in text) sẽ coi đây là QuotaExhausted — SAI theo ruling
+    mới. Test này phải FAIL với code cũ."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"error": {"message": "Quota exceeded for quota metric, please retry later"}},
+        )
+
+    with pytest.raises(RateLimited):
         await _provider(handler).complete(_spec())
 
 
@@ -254,6 +306,68 @@ async def test_400_dua_thong_bao_loi_cua_provider_vao_exception():
 def test_khai_bao_dung_nang_luc():
     provider = GeminiProvider(api_key="k", model="m")
     assert Capability.STRUCTURED_OUTPUT in provider.capabilities
+    # Ruling 3: complete() chỉ gọi generateContent (không stream), nên KHÔNG
+    # được khai báo STREAMING — một cờ sai còn tệ hơn cờ thiếu.
+    assert Capability.STREAMING not in provider.capabilities
+
+
+@pytest.mark.asyncio
+async def test_200_than_khong_phai_json_thanh_provider_unavailable():
+    """Item 1: response.json() trên đường 200 phải được bọc, không để ValueError
+    (không nằm trong cây LLMError) thoát ra ngoài và phá vỡ fallthrough của router."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not json at all")
+
+    with pytest.raises(ProviderUnavailable):
+        await _provider(handler).complete(_spec())
+
+
+@pytest.mark.asyncio
+async def test_retry_after_dang_http_date_khong_lam_sap_provider():
+    """Item 4: Retry-After có thể là HTTP-date (RFC 7231), không phải luôn là số giây."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            headers={"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"},
+            json={},
+        )
+
+    with pytest.raises(RateLimited) as info:
+        await _provider(handler).complete(_spec())
+    assert info.value.retry_after is None
+
+
+@pytest.mark.asyncio
+async def test_content_null_khong_gay_attribute_error():
+    """Item 5: content có thể tồn tại với giá trị null, không chỉ vắng mặt."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{"content": None, "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 0},
+            },
+        )
+
+    text, _ = await _provider(handler).complete(_spec())
+    assert text == ""
+
+
+@pytest.mark.asyncio
+async def test_thieu_usage_metadata_thi_token_bang_khong():
+    """Item 6: ghim hành vi mặc định 0 khi thiếu usageMetadata, tránh số liệu sai
+    lặng lẽ chảy vào sổ ghi token (Usage ledger) ở task sau."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    text, usage = await _provider(handler).complete(_spec())
+    assert text == "ok"
+    assert usage.input_tokens == 0
+    assert usage.output_tokens == 0
 
 
 @pytest.mark.asyncio

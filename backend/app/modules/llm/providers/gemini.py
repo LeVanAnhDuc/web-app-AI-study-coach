@@ -29,7 +29,11 @@ class GeminiProvider:
     """Provider gọi Gemini qua REST, không dùng SDK chính thức để giữ phụ thuộc tối thiểu."""
 
     name = "gemini"
-    capabilities = frozenset({Capability.STRUCTURED_OUTPUT, Capability.STREAMING})
+    # KHÔNG khai báo STREAMING: complete() chỉ gọi generateContent (không stream).
+    # capabilities là đầu vào cho việc định tuyến (Task 18) — một cờ sai còn tệ
+    # hơn một cờ thiếu, vì nó khiến tầng trên tưởng có thể stream rồi thất bại.
+    # Nếu sau này có task hiện thực streaming thật, thêm cờ lại lúc đó.
+    capabilities = frozenset({Capability.STRUCTURED_OUTPUT})
 
     def __init__(self, api_key: str, model: str) -> None:
         self._api_key = api_key
@@ -59,13 +63,22 @@ class GeminiProvider:
             raise ProviderUnavailable(f"gemini: lỗi mạng ({type(exc).__name__})") from None
 
         if response.status_code == 429:
-            noi_dung = response.text.lower()
-            if "quota" in noi_dung:
-                raise QuotaExhausted("gemini: hết hạn mức")
-            retry_after = response.headers.get("retry-after")
+            # Google trả RESOURCE_EXHAUSTED kèm chữ "quota" cho CẢ giới hạn theo
+            # phút (RPM) lẫn hết hạn mức thật theo ngày — không thể phân biệt
+            # hai trường hợp chỉ bằng từ "quota". Hai hướng sai lệch ở đây BẤT
+            # ĐỐI XỨNG nghiêm trọng: đoán nhầm thành RateLimited chỉ tốn một lần
+            # chờ rồi router rơi xuống provider khác, Gemini vẫn được thử lại
+            # sau; đoán nhầm thành QuotaExhausted khiến router bỏ hẳn Gemini cho
+            # tới hết ngày — và Gemini là provider miễn phí DUY NHẤT ép được
+            # JSON Schema gốc, nên mất nó là mất cả khả năng ép schema hôm đó.
+            # Vì vậy mặc định LUÔN nghiêng về RateLimited; chỉ khi có bằng chứng
+            # rõ ràng về "theo ngày" mới coi là QuotaExhausted. KHÔNG "dọn gọn"
+            # điều kiện này về dạng đối xứng — sự bất đối xứng là chủ đích.
+            if _co_bang_chung_het_han_muc_ngay(response.text):
+                raise QuotaExhausted("gemini: hết hạn mức theo ngày")
             raise RateLimited(
                 "gemini: bị giới hạn tần suất",
-                retry_after=float(retry_after) if retry_after else None,
+                retry_after=_doc_retry_after(response),
             )
         if response.status_code >= 500:
             raise ProviderUnavailable(f"gemini: máy chủ trả {response.status_code}")
@@ -75,7 +88,16 @@ class GeminiProvider:
                 f"{_trich_thong_bao_loi(response)}"
             )
 
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            # HTTP 200 không đảm bảo thân là JSON hợp lệ (mạng cắt giữa chừng,
+            # proxy chèn nội dung...). json.JSONDecodeError là ValueError, KHÔNG
+            # nằm trong cây LLMError — nếu để lọt ra ngoài, nó thoát khỏi toàn bộ
+            # thiết kế fallthrough của router (Task 18) và biến thành lỗi 500
+            # thay vì rơi xuống provider khác.
+            raise ProviderUnavailable("gemini: thân phản hồi không phải JSON hợp lệ") from None
+
         candidates = data.get("candidates") or []
         if not candidates:
             ly_do_chan = data.get("promptFeedback", {}).get("blockReason")
@@ -94,7 +116,11 @@ class GeminiProvider:
         if finish_reason is not None and finish_reason != "STOP":
             raise ProviderUnavailable(f"gemini: dừng sinh nội dung bất thường ({finish_reason})")
 
-        parts = candidate.get("content", {}).get("parts") or []
+        # .get("content", {}) chỉ trả default khi khoá VẮNG MẶT; nếu khoá tồn
+        # tại với giá trị null (Gemini có thể trả vậy khi finishReason bất
+        # thường) thì .get trả về None, và .get("parts") tiếp theo sẽ ném
+        # AttributeError. Dùng "or {}" để bọc cả hai trường hợp.
+        parts = (candidate.get("content") or {}).get("parts") or []
         text = "".join(part.get("text", "") for part in parts)
 
         meta = data.get("usageMetadata", {})
@@ -107,6 +133,39 @@ class GeminiProvider:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _doc_retry_after(response: httpx.Response) -> float | None:
+    """Đọc header Retry-After một cách an toàn.
+
+    RFC 7231 cho phép Retry-After là một HTTP-date thay vì số giây; khi đó
+    float() ném ValueError ngay TRONG lúc dựng RateLimited, gây đúng vấn đề
+    "exception không nằm trong cây LLMError" mà item 1 vá ở đường 200. Trả về
+    None thay vì để lỗi đó thoát ra.
+    """
+    gia_tri = response.headers.get("retry-after")
+    if gia_tri is None:
+        return None
+    try:
+        return float(gia_tri)
+    except ValueError:
+        return None
+
+
+def _co_bang_chung_het_han_muc_ngay(noi_dung_loi: str) -> bool:
+    """Tìm bằng chứng TÍCH CỰC rằng lỗi 429 là hết hạn mức theo ngày/tháng.
+
+    Không có khoá Gemini thật để xác nhận hình dạng lỗi thật của Google, nên
+    hàm này phải an toàn khi KHÔNG khớp gì cả — mặc định RateLimited ở nơi gọi
+    chính là điểm mấu chốt của ruling này, không phải hàm này.
+    """
+    thap = noi_dung_loi.lower()
+    # "per minute" là bằng chứng NGƯỢC LẠI — giới hạn theo phút, chắc chắn
+    # không phải hết hạn mức ngày — nên loại trừ trước.
+    if "per minute" in thap or "perminute" in thap:
+        return False
+    bang_chung_theo_ngay = ("perday", "per day", "per-day", "daily")
+    return any(dau_hieu in thap for dau_hieu in bang_chung_theo_ngay)
 
 
 def _trich_thong_bao_loi(response: httpx.Response) -> str:
