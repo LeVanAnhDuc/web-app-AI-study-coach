@@ -43,6 +43,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules.auth.models  # đăng ký bảng vào metadata
+import app.modules.llm.ledger  # đăng ký bảng token_ledger vào metadata
 from app.db import Base, engine, session_factory
 from app.main import app
 
