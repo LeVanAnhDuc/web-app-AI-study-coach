@@ -14,6 +14,7 @@ from app.modules.llm.routing import PROVIDER_RPM, ROUTING, LLMRouter
 from app.modules.llm.types import (
     AllProvidersFailed,
     CallSpec,
+    ProviderUnavailable,
     QuotaExhausted,
     RateLimited,
     TaskType,
@@ -95,6 +96,22 @@ async def test_roi_xuong_du_phong_khi_khong_ep_duoc_schema(redis):
     ket_qua = await router.complete_structured(_spec(), ThuNghiem)
     assert ket_qua.provider == "b"
     assert len(a.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_roi_xuong_du_phong_khi_provider_khong_kha_dung(redis):
+    # ProviderUnavailable (lỗi mạng/timeout/5xx) nằm trong _DUOC_PHEP_ROI_XUONG
+    # cùng RateLimited/QuotaExhausted/SchemaViolation, nhưng ba lớp kia đã có
+    # test fallthrough riêng còn lớp này thì chưa — bổ sung để không có lỗ
+    # hổng phủ trên đúng bốn lớp mà Ruling 2 nêu tên.
+    a = FakeProvider(name="a", errors=[ProviderUnavailable("mat mang")])
+    b = FakeProvider(name="b", responses=['{"ten": "Binh"}'])
+    router = LLMRouter({"a": a, "b": b}, redis)
+    router._chain = lambda task: ("a", "b")
+
+    ket_qua = await router.complete_structured(_spec(), ThuNghiem)
+    assert ket_qua.provider == "b"
+    assert ket_qua.value.ten == "Binh"
 
 
 @pytest.mark.asyncio

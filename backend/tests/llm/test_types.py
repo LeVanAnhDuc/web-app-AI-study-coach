@@ -3,6 +3,7 @@ import dataclasses
 import pytest
 
 from app.modules.llm.types import (
+    AllProvidersFailed,
     CallSpec,
     Capability,
     LLMError,
@@ -64,6 +65,26 @@ def test_rate_limited_retry_after_mac_dinh_none():
 def test_rate_limited_retry_after_co_the_la_none():
     ex = RateLimited("test", retry_after=None)
     assert ex.retry_after is None
+
+
+def test_llm_error_mac_dinh_usages_rong():
+    # usages khai báo Ở GỐC CÂY (LLMError), không phải gắn động trên từng
+    # lớp con — nên MỌI lớp con, kể cả lớp chưa từng liên quan tới một lần
+    # gọi provider (vd RateLimiterUnavailable), đều có sẵn thuộc tính này.
+    assert LLMError("loi chung").usages == []
+    assert QuotaExhausted("het quota").usages == []
+    assert ProviderUnavailable("mat mang").usages == []
+    assert SchemaViolation("sai schema").usages == []
+    assert AllProvidersFailed("het nha cung cap").usages == []
+
+
+def test_llm_error_luu_duoc_usages_qua_moi_lop_con():
+    usage = Usage(provider="a", model="m", input_tokens=1, output_tokens=2)
+    assert RateLimited("x", usages=[usage]).usages == [usage]
+    assert QuotaExhausted("x", usages=[usage]).usages == [usage]
+    assert ProviderUnavailable("x", usages=[usage]).usages == [usage]
+    assert SchemaViolation("x", usages=[usage]).usages == [usage]
+    assert AllProvidersFailed("x", usages=[usage]).usages == [usage]
 
 
 def test_call_spec_bi_dong():

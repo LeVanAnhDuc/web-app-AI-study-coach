@@ -5,7 +5,7 @@ from app.modules.llm.degrade import complete_structured, extract_json
 from app.modules.llm.providers.gemini import GeminiProvider
 from app.modules.llm.providers.groq import GroqProvider
 from app.modules.llm.providers.mistral import MistralProvider
-from app.modules.llm.types import CallSpec, Capability, SchemaViolation, TaskType
+from app.modules.llm.types import CallSpec, Capability, RateLimited, SchemaViolation, TaskType
 from tests.llm.fakes import FakeProvider
 
 
@@ -119,12 +119,29 @@ async def test_loi_ha_tang_thi_khong_thu_lai_ma_nem_ngay():
     # không phải "sai schema" — thử lại không giúp gì, chỉ đốt thêm hạn mức
     # miễn phí. Lớp hạ cấp phải để lỗi này thoát ra ngay lập tức, không nuốt
     # nó vào vòng lặp retry.
-    from app.modules.llm.types import RateLimited
-
     provider = FakeProvider(errors=[RateLimited("qua tai")])
     with pytest.raises(RateLimited):
         await complete_structured(provider, _spec(), ThuNghiem)
     assert len(provider.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_loi_ha_tang_giua_chung_khong_bi_thu_lai_nhung_van_mang_usage_da_tich_luy():
+    # Phát hiện của review Task 18: nếu lần thử thứ nhất sai schema (đã tốn
+    # token thật, usages có 1 mục) rồi lần thử thứ hai mới gặp lỗi hạ tầng,
+    # ngoại lệ hạ tầng đó phải mang theo usage của lần thứ nhất — mất nó sẽ
+    # khiến sổ token (Task 19) đánh giá THẤP HƠN mức tiêu thụ thật, đúng lỗi
+    # mà việc gắn usages vào SchemaViolation đã xử lý cho nhánh "hết lượt".
+    #
+    # Chốt HAI điều cùng lúc: (1) usages của lần 1 không bị mất (hành vi MỚI
+    # của vòng sửa này); (2) lỗi hạ tầng vẫn KHÔNG bị thử lại — đúng 2 lần
+    # gọi (lần 1 sai schema, lần 2 raise), không có lần 3 — nếu ai đó lỡ biến
+    # khối except mới thành một vòng retry, assert số lần gọi sẽ đỏ ngay.
+    provider = FakeProvider(responses=["hong"], errors=[None, RateLimited("qua tai")])
+    with pytest.raises(RateLimited) as exc_info:
+        await complete_structured(provider, _spec(), ThuNghiem)
+    assert len(provider.calls) == 2
+    assert len(exc_info.value.usages) == 1
 
 
 def test_gemini_that_khai_bao_structured_output():

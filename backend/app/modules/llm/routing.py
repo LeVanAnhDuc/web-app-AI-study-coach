@@ -68,26 +68,54 @@ from app.modules.llm.types import (
     Usage,
 )
 
-# Chuỗi định tuyến theo tác vụ. Đây là bảng DỰ KIẾN dựa trên đặc tính đã biết
-# của từng nhà cung cấp (Gemini ép schema gốc nên đứng đầu ở hầu hết tác vụ
-# sinh JSON; TUTOR_CHAT không ép schema nên ưu tiên Groq vì tốc độ). Task 20
-# đo bằng số liệu thật rồi sửa lại bảng này cho khớp.
-#
-# Đặt thành dữ liệu module-level (dict[TaskType, tuple[str, ...]]), không
-# phải logic if/elif giữa vòng lặp định tuyến: đổi thứ tự dự phòng cho một
-# tác vụ chỉ cần sửa một dòng ở đây, không cần đụng vào LLMRouter.
+# Chuỗi định tuyến theo tác vụ. Đây là bảng DỰ KIẾN, lấy verbatim từ mã mẫu
+# của brief Task 18 (kế hoạch), KHÔNG phải bảng do tôi tự suy ra bằng đo đạc.
+# Task 20 đo bằng số liệu thật rồi sửa lại bảng này cho khớp — người đọc sau
+# không cần đọc report Task 18 mới hiểu được hình dạng bảng nhờ chú thích
+# từng dòng dưới đây.
 ROUTING: dict[TaskType, tuple[str, ...]] = {
+    # Mặc định: Gemini trước — nhà cung cấp free tier DUY NHẤT ép được JSON
+    # Schema gốc (responseSchema), nên có khả năng cao nhất trả JSON khớp
+    # schema ngay lần gọi đầu; mỗi lần rơi xuống dự phòng tốn thêm một lượt
+    # gọi free tier thật.
+    #
+    # NORMALIZE_GOAL: mistral trước, KHÔNG theo mặc định Gemini-trước. Đây là
+    # thứ tự lấy verbatim từ brief — tôi KHÔNG xác nhận được lý do gốc của
+    # người viết kế hoạch. Giả thuyết CHƯA KIỂM CHỨNG của tôi: NormalizedGoal
+    # là schema phẳng, ít trường (domain/topic/level_from/level_to/
+    # weekly_minutes/deadline_weeks), nên rủi ro Groq/Mistral trả sai cấu
+    # trúc thấp hơn hẳn so với GENERATE_SYLLABUS/LESSON/QUIZ (mảng lồng
+    # nhau) — và NORMALIZE_GOAL chạy ở BƯỚC ĐẦU của mọi phiên học, tần suất
+    # gọi cao, nên có thể có chủ đích chừa hạn mức Gemini (RPM thấp nhất,
+    # xem PROVIDER_RPM) cho các tác vụ sinh nội dung phức tạp hơn phía sau.
+    # Task 20 nên xác nhận hoặc bác bỏ giả thuyết này bằng số liệu thật.
     TaskType.NORMALIZE_GOAL: ("mistral", "gemini", "groq"),
     TaskType.GENERATE_PLACEMENT: ("gemini", "mistral", "groq"),
     TaskType.GENERATE_SYLLABUS: ("gemini", "mistral", "groq"),
     TaskType.GENERATE_LESSON: ("gemini", "mistral", "groq"),
     TaskType.GENERATE_QUIZ: ("gemini", "mistral", "groq"),
+    # GRADE_FREE_TEXT: mistral trước, cùng tình trạng CHƯA XÁC NHẬN như
+    # NORMALIZE_GOAL — lấy verbatim từ brief. GradeOut cũng là schema phẳng
+    # (score/matched_criteria/feedback), nên cùng giả thuyết "schema đơn
+    # giản, rủi ro thấp" có thể áp dụng, nhưng tôi KHÔNG có bằng chứng người
+    # viết kế hoạch nghĩ vậy — nêu ra để Task 20 kiểm chứng, không phải để
+    # khẳng định.
     TaskType.GRADE_FREE_TEXT: ("mistral", "groq", "gemini"),
+    # TUTOR_CHAT: groq trước — tác vụ DUY NHẤT không ép schema (REGISTRY:
+    # response_model=None, xem test_registry.py), nên lợi thế ép schema gốc
+    # của Gemini không áp dụng; Groq ưu tiên vì tốc độ suy luận (mục tiêu là
+    # hội thoại phản hồi nhanh, không phải JSON chính xác).
     TaskType.TUTOR_CHAT: ("groq", "gemini", "mistral"),
     TaskType.GENERATE_REMEDIAL_LESSON: ("gemini", "mistral", "groq"),
 }
 
-# Hạn mức request mỗi phút, đặt thấp hơn hạn mức công bố để chừa biên an toàn.
+# Hạn mức request mỗi phút, đặt thấp hơn hạn mức công bố để chừa biên an
+# toàn. CẢNH BÁO TRUNG THỰC: ba con số này lấy verbatim từ brief/kế hoạch,
+# tôi CHƯA đối chiếu với trang tài liệu free tier hiện hành của Gemini/Groq/
+# Mistral — coi đây là PLACEHOLDER, không phải số đã kiểm chứng. Spec dự án
+# (mục rủi ro R-3) tự nhận hạn mức free tier "thay đổi thường xuyên và có
+# thể bị siết không báo trước", nên bất kỳ con số cứng nào ở đây cũng cần
+# một task riêng đối chiếu định kỳ, không chỉ kiểm một lần rồi tin mãi.
 PROVIDER_RPM: dict[str, int] = {"gemini": 10, "groq": 25, "mistral": 25}
 
 # Nguyên tắc 1 và 2: CHỈ bốn lớp này được coi là "nhà cung cấp đã từ chối,
@@ -198,16 +226,16 @@ class LLMRouter:
             try:
                 gia_tri, usages_lan_nay = await _hoan_tat_co_cau_truc(provider, spec, model_cls)
             except _DUOC_PHEP_ROI_XUONG as exc:
-                # Nguyên tắc 4/5: gom usages của lần thử hỏng này (nếu có,
-                # ví dụ SchemaViolation mang usages của mọi lần retry hỏng)
-                # trước khi rơi xuống nhà cung cấp kế tiếp — không được mất.
-                usages.extend(getattr(exc, "usages", []))
+                # Nguyên tắc 4/5: gom usages của lần thử hỏng này (mọi
+                # LLMError đều có sẵn thuộc tính usages — khai báo ở gốc cây
+                # types.LLMError, không phải gắn động — nên đọc thẳng, không
+                # cần getattr với giá trị mặc định) trước khi rơi xuống nhà
+                # cung cấp kế tiếp — không được mất.
+                usages.extend(exc.usages)
                 da_thu[ten] = _mo_ta_that_bai(exc)
                 continue
 
             usages.extend(usages_lan_nay)
             return RoutedResult(value=gia_tri, usages=usages, provider=ten)
 
-        loi = AllProvidersFailed(_dinh_dang_loi_tong_hop(spec.task, da_thu))
-        loi.usages = usages
-        raise loi
+        raise AllProvidersFailed(_dinh_dang_loi_tong_hop(spec.task, da_thu), usages=usages)

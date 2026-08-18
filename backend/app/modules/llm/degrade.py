@@ -12,8 +12,17 @@ nhưng câu trả lời sai schema. Khi provider tự thất bại (RateLimited,
 QuotaExhausted, ProviderUnavailable) — nghẽn mạng, hết hạn mức, bị chặn an
 toàn — retry ở đây không chữa được gì, chỉ đốt thêm một lượt gọi hạn mức miễn
 phí. Những lỗi đó phải thoát ra NGAY để tầng định tuyến (Task 18) rơi xuống
-provider dự phòng. Vì vậy hàm complete_structured() KHÔNG bọc try/except
-quanh provider.complete(); nó chỉ bắt lỗi phát sinh từ bước kiểm schema.
+provider dự phòng.
+
+complete_structured() CÓ một try/except HẸP quanh provider.complete(), nhưng
+nó không retry: khối except đó chỉ gắn usages đã tích luỹ từ các lần thử
+TRƯỚC (đã tốn token thật vì provider đã trả lời, chỉ là trả lời sai schema)
+vào ngoại lệ rồi `raise` lại NGUYÊN VẸN ngay lập tức — không có `continue`,
+không gọi lại provider, không đổi loại ngoại lệ. Nếu thiếu bước gắn usages
+này, một lỗi hạ tầng xảy ra ở lần thử thứ hai trở đi sẽ làm mất usages của
+(các) lần thử thứ nhất đã thành công về mặt mạng — cùng một kiểu mất dữ liệu
+mà việc gắn usages vào SchemaViolation (xem cuối hàm) đã xử lý cho nhánh hết
+lượt retry, chỉ khác ở nhánh thoát.
 """
 
 import dataclasses
@@ -22,7 +31,15 @@ import re
 from pydantic import BaseModel, ValidationError
 
 from app.modules.llm.providers.base import Provider
-from app.modules.llm.types import CallSpec, Capability, SchemaViolation, Usage
+from app.modules.llm.types import (
+    CallSpec,
+    Capability,
+    ProviderUnavailable,
+    QuotaExhausted,
+    RateLimited,
+    SchemaViolation,
+    Usage,
+)
 
 # Số lần thử lại mặc định sau lần gọi đầu tiên. Mỗi lần thử lại là một lượt
 # gọi API thật, tính vào hạn mức miễn phí dùng chung với người dùng thật —
@@ -85,8 +102,10 @@ async def complete_structured(
     nhầm là còn dư quota trong khi thực ra đã cạn.
 
     Lỗi hạ tầng (RateLimited, QuotaExhausted, ProviderUnavailable) từ
-    provider.complete() KHÔNG bị bắt ở đây — nó thoát ra ngay lập tức để tầng
-    định tuyến phía trên xử lý, vì thử lại một lỗi hạ tầng không chữa được gì.
+    provider.complete() KHÔNG bị retry ở đây — chỉ được gắn thêm usages đã
+    tích luỹ từ các lần thử trước rồi thoát ra ngay lập tức để tầng định
+    tuyến phía trên xử lý (xem docstring module ở đầu file), vì thử lại một
+    lỗi hạ tầng không chữa được gì.
     """
     hien_tai = spec
     if Capability.STRUCTURED_OUTPUT not in provider.capabilities:
@@ -96,7 +115,19 @@ async def complete_structured(
     loi_cuoi = ""
 
     for lan in range(max_retries + 1):
-        text, usage = await provider.complete(hien_tai)
+        try:
+            text, usage = await provider.complete(hien_tai)
+        except (RateLimited, QuotaExhausted, ProviderUnavailable) as exc:
+            # GẮN RỒI NÉM LẠI, KHÔNG RETRY: khối này không có continue, không
+            # gọi lại provider — nó chỉ gắn usages đã tích luỹ từ các lần thử
+            # TRƯỚC (đã tốn token thật, vì provider ĐÃ trả lời ở các lần đó,
+            # chỉ là trả lời sai schema) vào chính ngoại lệ, rồi để nó thoát
+            # ra NGAY, y hệt trước khi có khối try này. Thiếu bước gắn usages
+            # sẽ làm mất usage của các lần thử trước khi ngoại lệ hạ tầng này
+            # nổi lên — cùng lỗi dữ liệu mà việc gắn usages vào SchemaViolation
+            # bên dưới xử lý cho nhánh "hết lượt retry".
+            exc.usages = usages
+            raise
         usages.append(usage)
 
         try:
@@ -119,17 +150,16 @@ async def complete_structured(
                 ),
             )
 
-    loi = SchemaViolation(
+    # usages truyền qua tham số usages= của constructor (kế thừa từ LLMError),
+    # KHÔNG gắn động sau khi dựng: tầng định tuyến (Task 18) rơi xuống
+    # provider dự phòng khi gặp SchemaViolation, và nếu không đọc được usages
+    # từ đây thì các lần gọi đã tốn token thật của provider vừa hỏng sẽ biến
+    # mất khỏi sổ token, dù chúng đã tiêu hạn mức miễn phí thật sự.
+    raise SchemaViolation(
         f"{provider.name} không trả được JSON khớp schema sau "
-        f"{max_retries + 1} lần thử. Lỗi cuối: {loi_cuoi}"
+        f"{max_retries + 1} lần thử. Lỗi cuối: {loi_cuoi}",
+        usages=usages,
     )
-    # Gắn usages của TỪNG lần thử (kể cả các lần sai schema) vào chính ngoại
-    # lệ trước khi ném: tầng định tuyến (Task 18) rơi xuống provider dự
-    # phòng khi gặp SchemaViolation, và nếu không đọc được usages từ đây thì
-    # các lần gọi đã tốn token thật của provider vừa hỏng sẽ biến mất khỏi
-    # sổ token, dù chúng đã tiêu hạn mức miễn phí thật sự.
-    loi.usages = usages
-    raise loi
 
 
 def _tom_tat_loi(exc: ValidationError) -> str:
