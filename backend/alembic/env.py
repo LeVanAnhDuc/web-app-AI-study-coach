@@ -5,8 +5,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-import app.modules.auth.models  # đăng ký bảng vào metadata
-import app.modules.llm.ledger  # noqa: F401  đăng ký bảng token_ledger vào metadata
+import app.models  # noqa: F401  đăng ký MỌI bảng vào metadata — xem docstring app/models.py
 from alembic import context
 from app.config import get_settings
 from app.db import Base

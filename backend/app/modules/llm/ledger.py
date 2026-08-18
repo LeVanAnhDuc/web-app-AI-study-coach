@@ -79,7 +79,8 @@ async def record_usage(
     usages: list[Usage],
     succeeded: bool,
 ) -> None:
-    """Gộp mọi lần thử của MỘT lời gọi nghiệp vụ thành ĐÚNG MỘT dòng sổ.
+    """Gộp mọi lần thử của MỘT lời gọi nghiệp vụ, của ĐÚNG MỘT provider/model,
+    thành ĐÚNG MỘT dòng sổ.
 
     `usages` phải là usage của TỪNG lần thử (kể cả các lần thất bại schema),
     đúng như `complete_structured()` trả về — không chỉ lần cuối thành công.
@@ -88,28 +89,87 @@ async def record_usage(
     hơn thực tế, cho tới đúng ngày hạn mức miễn phí cạn sớm hơn số liệu dự
     báo.
 
+    `usages` PHẢI đến từ cùng một provider/model. Nếu tầng định tuyến (router)
+    rơi từ provider này xuống provider khác trong cùng một lượt xử lý — ví dụ
+    Gemini rate-limit rồi rơi xuống Groq — thì đó là HAI usage thuộc về HAI
+    provider khác nhau, và hàm này phải được gọi RIÊNG cho từng provider, mỗi
+    lần với đúng danh sách usages của provider đó. record_usage() TỪ CHỐI
+    (ValueError) một danh sách hỗn hợp thay vì tự tách thành nhiều dòng: tách
+    ở đây sẽ đổi cả cardinality của hàm (một lời gọi có thể sinh ra một hoặc
+    nhiều dòng, tuỳ dữ liệu) và làm `attempts` trên mỗi dòng trở nên mơ hồ
+    (attempts của dòng nào?). Router — không phải hàm này — mới biết usage
+    nào thuộc provider nào, nên quyết định "tách thế nào" phải nằm ở phía
+    router, và thất bại phải ồn ào ngay lúc phát triển thay vì âm thầm gộp
+    nhầm token của Gemini vào cột chi phí của Mistral trong dữ liệu.
+
     Danh sách rỗng thì không ghi gì — không có lời gọi provider nào xảy ra
     thì không có gì để ghi vào sổ.
+
+    HỢP ĐỒNG VỀ `session`: đây PHẢI là một session DÀNH RIÊNG cho lời gọi
+    record_usage() này, không dùng chung với các thay đổi khác của caller.
+    Hàm tự `commit()` khi thành công và có thể `rollback()` TOÀN BỘ session
+    khi ghi thất bại — nếu session này còn mang theo thay đổi khác của caller
+    chưa lưu, commit() sẽ vô tình chốt luôn chúng, còn rollback() khi lỗi sẽ
+    vô tình xoá mất chúng. Đây là THIẾT KẾ CÓ CHỦ Ý, không phải sơ suất: theo
+    Ruling 3, một lời gọi LLM đã tiêu token thật (thùng Redis đã trừ) và đã
+    có câu trả lời không được phép bị lỗi ghi sổ kéo theo thất bại — muốn vậy
+    việc ghi sổ phải nằm trong một transaction ĐỘC LẬP, có thể tự thất bại
+    một mình mà không kéo theo (hay bị kéo theo bởi) bất kỳ việc gì khác của
+    caller. Nếu session được truyền vào còn thay đổi chưa lưu, hàm chỉ LOG
+    CẢNH BÁO (không raise — raise ở đây sẽ lại huỷ một kết quả LLM đã thành
+    công, đúng điều Ruling 3 cấm) để lộ ra lỗi dùng sai của caller.
 
     Ghi thất bại (CSDL tạm thời không phản hồi) KHÔNG được ném ngoại lệ ra
     ngoài: tới lúc hàm này chạy, token đã bị tiêu thật (thùng Redis đã trừ
     trước khi gọi provider) và câu trả lời cho người dùng đã có sẵn — huỷ nó
     chỉ vì không ghi được một dòng thống kê là biến một lời gọi ĐÃ THÀNH CÔNG
-    thành lỗi mà không giúp ích gì. Lỗi vẫn phải được LOG rõ ràng (không nuốt
-    lặng lẽ) để có thể theo dõi tần suất mất dòng.
+    thành lỗi mà không giúp ích gì. Lỗi vẫn phải được LOG rõ ràng, kèm đủ số
+    liệu (không phải nội dung) để sau này ĐỐI SOÁT được đã mất bao nhiêu, chứ
+    không chỉ biết là "có mất".
     """
     if not usages:
         return
+
+    providers = {u.provider for u in usages}
+    models = {u.model for u in usages}
+    if len(providers) > 1 or len(models) > 1:
+        raise ValueError(
+            f"record_usage() nhận usages từ nhiều provider/model khác nhau trong "
+            f"cùng một lời gọi (providers={sorted(providers)}, models={sorted(models)}). "
+            "Mỗi lời gọi record_usage() chỉ được ghi usage của ĐÚNG MỘT provider/model. "
+            "Nếu router rơi xuống nhiều provider trong cùng một lượt xử lý, hãy gọi "
+            "record_usage() RIÊNG cho từng provider, mỗi lần với đúng usages của "
+            "provider đó."
+        )
+
+    if session.new or session.dirty:
+        _log.warning(
+            "record_usage() được gọi trên một session đang có thay đổi chưa lưu "
+            "(session.new=%d, session.dirty=%d). Hàm này tự commit()/rollback() TOÀN "
+            "BỘ session, nên các thay đổi khác của caller sẽ bị ảnh hưởng theo — "
+            "session truyền vào record_usage() cần là một session DÀNH RIÊNG cho "
+            "việc ghi sổ token.",
+            len(session.new),
+            len(session.dirty),
+        )
+
+    # Đã kiểm đồng nhất provider/model ở trên, nên lấy phần tử nào của usages
+    # cũng cho cùng một giá trị — usages[0] không phải một lựa chọn tuỳ ý.
+    tong_input = sum(u.input_tokens for u in usages)
+    tong_output = sum(u.output_tokens for u in usages)
+    so_lan_thu = len(usages)
+    provider = usages[0].provider
+    model = usages[0].model
 
     session.add(
         TokenLedger(
             user_id=user_id,
             task=task.value,
-            provider=usages[-1].provider,
-            model=usages[-1].model,
-            input_tokens=sum(u.input_tokens for u in usages),
-            output_tokens=sum(u.output_tokens for u in usages),
-            attempts=len(usages),
+            provider=provider,
+            model=model,
+            input_tokens=tong_input,
+            output_tokens=tong_output,
+            attempts=so_lan_thu,
             succeeded=succeeded,
         )
     )
@@ -123,10 +183,18 @@ async def record_usage(
         # CSDL mới được coi là "chấp nhận mất một dòng báo cáo".
         await session.rollback()
         _log.error(
-            "Ghi sổ token thất bại, bỏ qua dòng này (task=%s, provider=%s): "
-            "CSDL không phản hồi hoặc từ chối ghi.",
+            "Ghi sổ token thất bại, mất một dòng báo cáo (không ảnh hưởng hạn mức vì "
+            "Redis đã trừ token trước khi gọi provider, nhưng số liệu báo cáo sẽ THẤP "
+            "HƠN thực tế): task=%s provider=%s model=%s input_tokens=%d "
+            "output_tokens=%d attempts=%d succeeded=%s user_id=%s",
             task.value,
-            usages[-1].provider,
+            provider,
+            model,
+            tong_input,
+            tong_output,
+            so_lan_thu,
+            succeeded,
+            user_id,
             exc_info=True,
         )
 
