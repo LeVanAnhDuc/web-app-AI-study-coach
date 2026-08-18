@@ -23,6 +23,11 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "fakeredis>=2.26",
+    # fakeredis chỉ thực thi được Lua (EVAL/EVALSHA) khi có lupa; thiếu nó, mọi
+    # test dùng script Lua (Task 15 — thùng token) sẽ không chạy được script thật,
+    # nghĩa là test xanh mà không chứng minh được gì về hành vi thật sẽ chạy khi
+    # triển khai.
+    "lupa>=2.2",
     "ruff>=0.8",
 ]
 
