@@ -47,3 +47,14 @@ addopts = "-m 'not live'"
 
 [tool.ruff]
 line-length = 100
+# Các file migration alembic là bản ghi lịch sử của những gì đã áp dụng lên CSDL
+# thật; không sửa theo style để tránh làm lệch nội dung file so với migration
+# đã chạy trên CSDL.
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI dùng Depends(...)/HTTPBearer(...) làm giá trị mặc định của tham số -
+# đây là idiom bắt buộc của framework để dependency injection hoạt động, không
+# phải lỗi thực sự. Không xóa ignore này để "dọn dẹp".
+"app/modules/auth/router.py" = ["B008"]
+"app/modules/auth/deps.py" = ["B008"]

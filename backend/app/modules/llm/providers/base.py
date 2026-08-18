@@ -1,6 +1,6 @@
 from typing import Protocol, runtime_checkable
 
-from app.modules.llm.types import Capability, CallSpec, Usage
+from app.modules.llm.types import CallSpec, Capability, Usage
 
 
 @runtime_checkable

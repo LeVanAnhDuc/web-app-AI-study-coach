@@ -1,6 +1,6 @@
 import json
 
-from app.modules.llm.registry import GradeOut, NormalizedGoal, REGISTRY, SyllabusOut
+from app.modules.llm.registry import REGISTRY, GradeOut, NormalizedGoal, SyllabusOut
 from app.modules.llm.schema_util import to_provider_schema
 
 
@@ -51,7 +51,7 @@ def test_truong_tuy_chon_van_co_mat_trong_properties():
 def test_tat_ca_model_trong_registry_co_the_chuyen_doi():
     """Integration test: verify all response_model schemas can be converted and serialized."""
     converted_count = 0
-    for task, spec in REGISTRY.items():
+    for spec in REGISTRY.values():
         if spec.response_model is None:
             continue
         # Should not raise

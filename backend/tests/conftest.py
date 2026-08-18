@@ -36,15 +36,15 @@ os.environ["DATABASE_URL"] = _database_url_test
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/1")
 os.environ.setdefault("JWT_SECRET", "bi-mat-chi-dung-trong-test-hs256")
 
-from collections.abc import AsyncIterator  # noqa: E402
+from collections.abc import AsyncIterator
 
-import httpx  # noqa: E402
-import pytest_asyncio  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+import httpx
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.modules.auth.models  # noqa: E402,F401  đăng ký bảng vào metadata
-from app.db import Base, engine, session_factory  # noqa: E402
-from app.main import app  # noqa: E402
+import app.modules.auth.models  # đăng ký bảng vào metadata
+from app.db import Base, engine, session_factory
+from app.main import app
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)

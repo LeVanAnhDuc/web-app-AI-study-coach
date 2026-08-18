@@ -1,7 +1,7 @@
 import pytest
 
 from app.modules.llm.fixtures import FixtureMissing, FixtureProvider, fixture_key
-from app.modules.llm.types import Capability, CallSpec, ProviderUnavailable, TaskType
+from app.modules.llm.types import CallSpec, Capability, ProviderUnavailable, TaskType
 from tests.llm.fakes import FakeProvider
 
 

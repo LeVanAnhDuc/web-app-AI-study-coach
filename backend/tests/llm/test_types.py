@@ -3,8 +3,8 @@ import dataclasses
 import pytest
 
 from app.modules.llm.types import (
-    Capability,
     CallSpec,
+    Capability,
     LLMError,
     ProviderUnavailable,
     QuotaExhausted,
@@ -21,7 +21,7 @@ def test_capability_co_ba_thanh_vien_dung():
         "STREAMING",
         "PROMPT_CACHE",
     }
-    assert set(c.name for c in Capability) == expected
+    assert {c.name for c in Capability} == expected
 
 
 def test_capability_gia_tri_chuoi_dung():
