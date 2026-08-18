@@ -49,7 +49,9 @@ này dùng đúng cách. Bảy nguyên tắc chi phối vòng lặp bên dưới
    `str(exc)` của chúng không mang bí mật (xem docstring từng adapter).
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -139,7 +141,7 @@ class RoutedResult:
     công — mỗi phần tử tự mang `provider` của chính nó (xem nguyên tắc 5).
     """
 
-    value: BaseModel
+    value: BaseModel | str
     usages: list[Usage] = field(default_factory=list)
     provider: str = ""
 
@@ -198,7 +200,25 @@ class LLMRouter:
     def _chain(self, task: TaskType) -> tuple[str, ...]:
         return self._routing[task]
 
-    async def complete_structured(self, spec: CallSpec, model_cls: type[BaseModel]) -> RoutedResult:
+    async def _lap_qua_chuoi_du_phong(
+        self,
+        spec: CallSpec,
+        thuc_hien: Callable[[Provider, CallSpec], Awaitable[tuple[Any, list[Usage]]]],
+    ) -> RoutedResult:
+        """Vòng lặp DÙNG CHUNG giữa `complete_structured` và `complete_text`:
+        chọn nhà cung cấp theo chuỗi định tuyến của tác vụ, hỏi thùng token
+        TRƯỚC khi gọi (nguyên tắc 6), rơi xuống dự phòng đúng bốn lớp lỗi của
+        nguyên tắc 2, và gom usages của MỌI lần thử — kể cả các lần hỏng
+        (nguyên tắc 4/5) — trước khi trả kết quả hoặc ném AllProvidersFailed.
+
+        `thuc_hien` là phần DUY NHẤT khác nhau giữa hai luồng gọi: với đầu ra
+        có cấu trúc, nó đi qua tầng hạ cấp JSON (degrade.py) để ép/kiểm/thử
+        lại; với văn bản tự do (TUTOR_CHAT — REGISTRY không có
+        response_model), nó gọi thẳng `provider.complete()` vì không có gì
+        để kiểm schema. Gộp phần dùng chung vào một chỗ DUY NHẤT để cả hai
+        luồng chắc chắn cùng đi qua thùng token và cùng luật rơi xuống dự
+        phòng — không tồn tại đường tắt nào gọi provider mà bỏ qua thùng.
+        """
         usages: list[Usage] = []
         da_thu: dict[str, str] = {}
 
@@ -224,7 +244,7 @@ class LLMRouter:
                 continue
 
             try:
-                gia_tri, usages_lan_nay = await _hoan_tat_co_cau_truc(provider, spec, model_cls)
+                gia_tri, usages_lan_nay = await thuc_hien(provider, spec)
             except _DUOC_PHEP_ROI_XUONG as exc:
                 # Nguyên tắc 4/5: gom usages của lần thử hỏng này (mọi
                 # LLMError đều có sẵn thuộc tính usages — khai báo ở gốc cây
@@ -239,3 +259,31 @@ class LLMRouter:
             return RoutedResult(value=gia_tri, usages=usages, provider=ten)
 
         raise AllProvidersFailed(_dinh_dang_loi_tong_hop(spec.task, da_thu), usages=usages)
+
+    async def complete_structured(self, spec: CallSpec, model_cls: type[BaseModel]) -> RoutedResult:
+        """Chạy một lời gọi CÓ ép schema (`model_cls`), qua tầng hạ cấp JSON
+        (degrade.py) để ép/kiểm/thử lại trước khi trả về."""
+
+        async def _thu(provider: Provider, spec: CallSpec) -> tuple[BaseModel, list[Usage]]:
+            return await _hoan_tat_co_cau_truc(provider, spec, model_cls)
+
+        return await self._lap_qua_chuoi_du_phong(spec, _thu)
+
+    async def complete_text(self, spec: CallSpec) -> RoutedResult:
+        """Chạy một lời gọi KHÔNG ép schema (vd TUTOR_CHAT — REGISTRY không
+        có response_model cho tác vụ này), qua ĐÚNG cùng chuỗi định tuyến,
+        thùng token, và luật rơi xuống dự phòng như `complete_structured` —
+        chỉ khác ở chỗ không đi qua tầng hạ cấp JSON (degrade.py), vì không
+        có `model_cls` nào để kiểm. `RoutedResult.value` ở đây là `str`.
+
+        Đây KHÔNG phải một đường tắt gọi thẳng `provider.complete()` bỏ qua
+        thùng token — nó tái dùng `_lap_qua_chuoi_du_phong`, cùng một vòng
+        lặp hỏi thùng trước khi gọi mà `complete_structured` dùng, nên hạn
+        mức free-tier vẫn được thực thi cho cả tác vụ hội thoại.
+        """
+
+        async def _thu(provider: Provider, spec: CallSpec) -> tuple[str, list[Usage]]:
+            text, usage = await provider.complete(spec)
+            return text, [usage]
+
+        return await self._lap_qua_chuoi_du_phong(spec, _thu)
