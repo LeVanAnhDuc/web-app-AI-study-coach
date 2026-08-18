@@ -28,7 +28,7 @@ from app.modules.llm.types import CallSpec, Capability, SchemaViolation, Usage
 # gọi API thật, tính vào hạn mức miễn phí dùng chung với người dùng thật —
 # đặt thành hằng số có tên thay vì số 2 rải rác trong vòng lặp, để bất kỳ ai
 # muốn đổi ngân sách retry chỉ cần sửa một chỗ và thấy ngay lý do nó tồn tại.
-SO_LAN_THU_LAI_MAC_DINH = 2
+_SO_LAN_THU_LAI_MAC_DINH = 2
 
 _KHOI_MA = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
@@ -67,7 +67,7 @@ async def complete_structured(
     provider: Provider,
     spec: CallSpec,
     model_cls: type[BaseModel],
-    max_retries: int = SO_LAN_THU_LAI_MAC_DINH,
+    max_retries: int = _SO_LAN_THU_LAI_MAC_DINH,
 ) -> tuple[BaseModel, list[Usage]]:
     """Gọi provider và trả về đối tượng đã kiểm theo model_cls.
 
@@ -100,6 +100,11 @@ async def complete_structured(
         usages.append(usage)
 
         try:
+            # Bắt đúng ValidationError, KHÔNG bắt thêm ValueError/JSONDecodeError:
+            # model_validate_json là điểm parse JSON DUY NHẤT ở đây, và nó luôn
+            # ném ValidationError (type json_invalid) khi chuỗi không parse được,
+            # không bao giờ ném json.JSONDecodeError. Nếu sau này đổi sang
+            # json.loads(...) rồi model_validate(...), phải mở rộng except này.
             return model_cls.model_validate_json(extract_json(text)), usages
         except ValidationError as exc:
             loi_cuoi = _tom_tat_loi(exc)
