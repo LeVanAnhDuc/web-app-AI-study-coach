@@ -384,13 +384,13 @@ async def test_khoa_api_khong_lot_vao_thong_bao_loi():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "code, body",
+    "code, body, headers",
     [
-        (429, {"error": {"message": "Quota exceeded for quota metric"}}),
-        (429, {}),
-        (503, {}),
-        (400, {"error": {"message": "Invalid JSON payload received"}}),
-        (200, {"candidates": [], "promptFeedback": {"blockReason": "SAFETY"}}),
+        (429, {"error": {"message": "Quota exceeded for quota metric"}}, {}),
+        (429, {}, {}),
+        (503, {}, {}),
+        (400, {"error": {"message": "Invalid JSON payload received"}}, {}),
+        (200, {"candidates": [], "promptFeedback": {"blockReason": "SAFETY"}}, {}),
         (
             200,
             {
@@ -398,17 +398,27 @@ async def test_khoa_api_khong_lot_vao_thong_bao_loi():
                     {"content": {"parts": []}, "finishReason": "SAFETY"},
                 ]
             },
+            {},
         ),
+        # Item 1 (fix round 1): thân 200 không phải JSON hợp lệ.
+        (200, b"not json at all", {}),
+        # Item 4 (fix round 1): Retry-After dạng HTTP-date thay vì số giây.
+        (429, {}, {"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"}),
     ],
 )
-async def test_khoa_api_khong_lot_qua_moi_duong_loi(code, body):
+async def test_khoa_api_khong_lot_qua_moi_duong_loi(code, body, headers):
     """Ruling 1 & 5 xác nhận qua nhiều test: khoá không lộ trong exception hay URL
-    trên mọi đường lỗi mới thêm cho các ruling 2, 3, 4."""
+    trên mọi đường lỗi, kể cả hai đường lỗi mới thêm ở fix round 1 (thân 200
+    không phải JSON, Retry-After dạng HTTP-date) — hai đường dễ bị đụng tới
+    nhất ở các lần sửa sau, nên phải nằm trong vòng quét tự động này thay vì
+    chỉ dựa vào đọc code."""
     ghi_nhan = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         ghi_nhan["request"] = request
-        return httpx.Response(code, json=body)
+        if isinstance(body, bytes):
+            return httpx.Response(code, content=body, headers=headers)
+        return httpx.Response(code, json=body, headers=headers)
 
     provider = _provider(handler, api_key=_KHOA_SENTINEL)
     with pytest.raises((RateLimited, QuotaExhausted, ProviderUnavailable)) as info:
