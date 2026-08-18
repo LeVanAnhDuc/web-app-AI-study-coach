@@ -19,6 +19,23 @@ Ranh giới KHÔNG làm ở đây: không tự retry, không tự sleep, không 
 `LLMRouter` (routing.py); lớp này chỉ gọi router đúng cách rồi ghi sổ kết
 quả router trả về.
 
+Session ghi sổ: `LLMService` TỰ MỞ một session RIÊNG cho mỗi lần ghi sổ (qua
+`session_factory` tiêm vào constructor, mặc định `app.db.session_factory`) —
+`run()` KHÔNG nhận session của caller. Lý do là cấu trúc, không phải quy
+ước: `record_usage()` tự `commit()`/`rollback()` TOÀN BỘ session được truyền
+vào (Task 15, để ghi sổ thất bại độc lập không huỷ một câu trả lời LLM đã
+thành công — xem docstring `record_usage`). Nếu `run()` mượn session của
+caller — mẫu chuẩn của dự án là session request-scoped qua
+`Depends(get_session)`, xem `auth/router.py` — một thay đổi CHƯA COMMIT khác
+của caller trên CHÍNH session đó sẽ bị commit LẶNG LẼ như tác dụng phụ của
+một lời gọi LLM thành công, không có ngoại lệ, không có log nào lộ ra phía
+caller. Một docstring cảnh báo không đủ vì `curriculum`/`content`/
+`assessment`/`tutor` CHỈ được đọc giao diện facade này, không bao giờ đọc
+`ledger.py` — viết cạm bẫy vào docstring của lớp mà mọi caller tương lai
+không bao giờ chạm tới chỉ là giao lại cái bẫy, không phải gỡ nó. Tự mở
+session riêng biến việc này thành KHÔNG THỂ làm sai về mặt cấu trúc, thay vì
+"mọi người phải nhớ".
+
 Về BYOK (bring your own key, khoá API riêng của người dùng — keyvault.py):
 NGOÀI PHẠM VI của lớp này. Chữ ký `run()` không nhận tham số khoá/nhà cung
 cấp do người dùng chỉ định, và chưa có bảng CSDL nào lưu khoá BYOK ở M0/M1
@@ -31,6 +48,7 @@ không bao giờ dùng chung thùng "shared" — và khoá API giải mã không
 
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -39,6 +57,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.db import session_factory as _tao_session_ghi_so_mac_dinh
 from app.modules.llm.fixtures import FixtureProvider
 from app.modules.llm.ledger import record_usage
 from app.modules.llm.providers.base import Provider
@@ -128,12 +147,21 @@ async def _ghi_so_theo_provider(
 class LLMService:
     """Cổng duy nhất ra tầng LLM — xem docstring module."""
 
-    def __init__(self, providers: dict[str, Provider], redis) -> None:
+    def __init__(
+        self,
+        providers: dict[str, Provider],
+        redis,
+        session_factory: Callable[[], AsyncSession] = _tao_session_ghi_so_mac_dinh,
+    ) -> None:
         self._router = LLMRouter(providers, redis)
+        # Tiêm ở constructor (không đọc app.db.session_factory thẳng trong
+        # thân run()/_ghi_so) để test có thể thay bằng một factory khác —
+        # vd một factory dùng CSDL test riêng cho việc ghi sổ, tách khỏi
+        # session mà test dùng để dựng dữ liệu ban đầu.
+        self._tao_session = session_factory
 
     async def run(
         self,
-        session: AsyncSession,
         user_id: uuid.UUID | None,
         task: TaskType,
         user_prompt: str,
@@ -150,6 +178,18 @@ class LLMService:
         ngoại mờ khi ghi sổ, không bao giờ được đưa vào nội dung gửi cho
         provider — dữ liệu prompt ở free tier có thể bị dùng để huấn luyện
         mô hình của bên thứ ba.
+
+        KHÔNG có tham số `session`: hàm này CỐ Ý không nhận (và không dùng)
+        session của caller. Việc ghi sổ mở một session RIÊNG của chính nó
+        (xem `_ghi_so`, `self._tao_session`) — session của caller (nếu có,
+        ví dụ session request-scoped chuẩn của dự án qua
+        `Depends(get_session)`) không bao giờ bị chạm tới, nên không bao giờ
+        có nguy cơ một `commit()`/`rollback()` nội bộ của việc ghi sổ vô
+        tình chốt hay xoá một thay đổi CHƯA LƯU khác của caller trên chính
+        session đó — đúng nguy cơ mà `record_usage()` (ledger.py) đã cảnh
+        báo bằng log, nhưng một cảnh báo bằng log không đủ ở facade DUY NHẤT
+        mà mọi module nghiệp vụ được phép gọi: không caller nào trong số đó
+        được phép (và sẽ không) đọc docstring của `ledger.py`.
 
         Ghi sổ chạy trên CẢ đường thành công lẫn đường thất bại. Khi mọi nhà
         cung cấp trong chuỗi định tuyến đều hỏng, router ném
@@ -178,15 +218,34 @@ class LLMService:
             else:
                 ket_qua = await self._router.complete_structured(call, model_cls)
         except LLMError as exc:
-            await _ghi_so_theo_provider(
-                session, user_id, task, exc.usages, nha_cung_cap_thanh_cong=None
-            )
+            await self._ghi_so(user_id, task, exc.usages, nha_cung_cap_thanh_cong=None)
             raise
 
-        await _ghi_so_theo_provider(
-            session, user_id, task, ket_qua.usages, nha_cung_cap_thanh_cong=ket_qua.provider
-        )
+        await self._ghi_so(user_id, task, ket_qua.usages, nha_cung_cap_thanh_cong=ket_qua.provider)
         return ket_qua.value
+
+    async def _ghi_so(
+        self,
+        user_id: uuid.UUID | None,
+        task: TaskType,
+        usages: list[Usage],
+        *,
+        nha_cung_cap_thanh_cong: str | None,
+    ) -> None:
+        """Mở một session RIÊNG chỉ để ghi sổ token, dùng xong đóng ngay.
+
+        `async with self._tao_session()` đảm bảo phiên này không sống lâu
+        hơn một lần ghi sổ và không bị chia sẻ với bất kỳ điều gì khác của
+        caller — độc lập hoàn toàn với transaction (nếu có) mà caller đang
+        chạy. `record_usage()` (bên trong `_ghi_so_theo_provider`) tự
+        `commit()`/`rollback()` session này, và vì đây là session KHÔNG
+        mang thay đổi nào khác ngoài các dòng sổ đang ghi, hành vi đó không
+        còn nguy cơ ảnh hưởng ngoài ý muốn tới bất kỳ ai.
+        """
+        async with self._tao_session() as session:
+            await _ghi_so_theo_provider(
+                session, user_id, task, usages, nha_cung_cap_thanh_cong=nha_cung_cap_thanh_cong
+            )
 
 
 @lru_cache

@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
+from app.db import session_factory
 from app.modules.llm.ledger import TokenLedger
 from app.modules.llm.providers.gemini import GeminiProvider
 from app.modules.llm.providers.groq import GroqProvider
@@ -26,25 +27,25 @@ def redis():
     return fakeredis.aioredis.FakeRedis()
 
 
-# --- Test thuộc brief (Bước 1) ---
+# --- Test thuộc brief (Bước 1), đã bỏ tham số session — run() không còn nhận
+# session của caller (xem Ruling bổ sung: session ghi sổ là của facade, không
+# phải của caller) ---
 
 
 @pytest.mark.asyncio
-async def test_tra_ve_dung_model_da_dang_ky(db_session, redis):
+async def test_tra_ve_dung_model_da_dang_ky(redis):
     service = LLMService({"gemini": FakeProvider(name="gemini", responses=[_GOAL_JSON])}, redis)
-    ket_qua = await service.run(
-        db_session, uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React 8 tuan"
-    )
+    ket_qua = await service.run(uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React 8 tuan")
     assert isinstance(ket_qua, NormalizedGoal)
     assert ket_qua.topic == "React"
     assert ket_qua.weekly_minutes == 300
 
 
 @pytest.mark.asyncio
-async def test_dung_prompt_he_thong_tu_registry(db_session, redis):
+async def test_dung_prompt_he_thong_tu_registry(redis):
     provider = FakeProvider(name="gemini", responses=[_GOAL_JSON])
     service = LLMService({"gemini": provider}, redis)
-    await service.run(db_session, uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")
+    await service.run(uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")
     assert "bộ máy nội dung" in provider.calls[0].system
 
 
@@ -52,7 +53,7 @@ async def test_dung_prompt_he_thong_tu_registry(db_session, redis):
 async def test_ghi_so_khi_thanh_cong(db_session, redis):
     user_id = uuid.uuid4()
     service = LLMService({"gemini": FakeProvider(name="gemini", responses=[_GOAL_JSON])}, redis)
-    await service.run(db_session, user_id, TaskType.NORMALIZE_GOAL, "hoc React")
+    await service.run(user_id, TaskType.NORMALIZE_GOAL, "hoc React")
 
     row = await db_session.scalar(select(TokenLedger).where(TokenLedger.user_id == user_id))
     assert row is not None
@@ -67,7 +68,7 @@ async def test_ghi_so_ca_khi_that_bai(db_session, redis):
     service = LLMService({"gemini": provider}, redis)
 
     with pytest.raises(AllProvidersFailed):
-        await service.run(db_session, user_id, TaskType.NORMALIZE_GOAL, "hoc React")
+        await service.run(user_id, TaskType.NORMALIZE_GOAL, "hoc React")
 
     row = await db_session.scalar(select(TokenLedger).where(TokenLedger.user_id == user_id))
     assert row is not None
@@ -75,25 +76,25 @@ async def test_ghi_so_ca_khi_that_bai(db_session, redis):
 
 
 @pytest.mark.asyncio
-async def test_khong_ep_schema_thi_tra_ve_van_ban(db_session, redis):
+async def test_khong_ep_schema_thi_tra_ve_van_ban(redis):
     service = LLMService({"groq": FakeProvider(name="groq", responses=["Chao ban nhe"])}, redis)
-    ket_qua = await service.run(db_session, uuid.uuid4(), TaskType.TUTOR_CHAT, "closure la gi")
+    ket_qua = await service.run(uuid.uuid4(), TaskType.TUTOR_CHAT, "closure la gi")
     assert ket_qua == "Chao ban nhe"
 
 
 @pytest.mark.asyncio
-async def test_khong_co_provider_nao_thi_bao_loi_ro_rang(db_session, redis):
+async def test_khong_co_provider_nao_thi_bao_loi_ro_rang(redis):
     service = LLMService({}, redis)
     with pytest.raises(AllProvidersFailed):
-        await service.run(db_session, uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")
+        await service.run(uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")
 
 
 @pytest.mark.asyncio
-async def test_dinh_danh_nguoi_dung_khong_lot_vao_prompt(db_session, redis):
+async def test_dinh_danh_nguoi_dung_khong_lot_vao_prompt(redis):
     user_id = uuid.uuid4()
     provider = FakeProvider(name="gemini", responses=[_GOAL_JSON])
     service = LLMService({"gemini": provider}, redis)
-    await service.run(db_session, user_id, TaskType.NORMALIZE_GOAL, "hoc React")
+    await service.run(user_id, TaskType.NORMALIZE_GOAL, "hoc React")
 
     goi = provider.calls[0]
     assert str(user_id) not in goi.system
@@ -130,7 +131,7 @@ async def test_tach_usage_theo_provider_khi_roi_xuong_du_phong(db_session, redis
     gemini = FakeProvider(name="gemini", responses=[_GOAL_JSON])
     service = LLMService({"mistral": mistral, "gemini": gemini}, redis)
 
-    ket_qua = await service.run(db_session, user_id, TaskType.NORMALIZE_GOAL, "hoc React")
+    ket_qua = await service.run(user_id, TaskType.NORMALIZE_GOAL, "hoc React")
     assert isinstance(ket_qua, NormalizedGoal)
 
     rows = (
@@ -144,7 +145,7 @@ async def test_tach_usage_theo_provider_khi_roi_xuong_du_phong(db_session, redis
 
 
 @pytest.mark.asyncio
-async def test_tac_vu_khong_schema_van_di_qua_thung_token(db_session, redis):
+async def test_tac_vu_khong_schema_van_di_qua_thung_token(redis):
     """Bẫy: một cách hiện thực ngây thơ cho nhánh 'không ép schema' (TUTOR_CHAT
     — REGISTRY không có response_model) là gọi thẳng provider.complete(), bỏ
     qua hoàn toàn thùng token của router — tháo bỏ đúng lá chắn hạn mức
@@ -163,11 +164,11 @@ async def test_tac_vu_khong_schema_van_di_qua_thung_token(db_session, redis):
     service = LLMService({"gemini": provider}, redis)
 
     for _ in range(PROVIDER_RPM["gemini"]):
-        ket_qua = await service.run(db_session, user_id, TaskType.TUTOR_CHAT, "hoc React")
+        ket_qua = await service.run(user_id, TaskType.TUTOR_CHAT, "hoc React")
         assert ket_qua == "{}"
 
     with pytest.raises(AllProvidersFailed):
-        await service.run(db_session, user_id, TaskType.TUTOR_CHAT, "hoc React")
+        await service.run(user_id, TaskType.TUTOR_CHAT, "hoc React")
 
 
 # --- Test bổ sung: bẫy — build_providers phải khớp adapter THẬT, không phải suy đoán ---
@@ -210,3 +211,58 @@ def test_build_providers_bo_qua_nha_cung_cap_thieu_khoa():
     )
     providers = build_providers(settings)
     assert set(providers.keys()) == {"gemini"}
+
+
+# --- Test bổ sung: facade phải tự mở session RIÊNG để ghi sổ, không mượn session
+# của caller — bản sửa theo yêu cầu review sau khi Task 19 hoàn thành lần đầu ---
+
+
+@pytest.mark.asyncio
+async def test_ghi_so_khong_dung_session_cua_caller(redis):
+    """Trước bản sửa này, `run()` nhận session của caller rồi truyền thẳng
+    xuống `record_usage()` — hàm đó tự `commit()` TOÀN BỘ session được
+    truyền vào (xem docstring `ledger.record_usage`). Một session
+    request-scoped chuẩn của dự án (`Depends(get_session)`, xem
+    `auth/router.py`) mang theo một thay đổi CHƯA COMMIT khác của caller sẽ
+    bị COMMIT LẶNG LẼ như tác dụng phụ của một lời gọi LLM thành công — không
+    ngoại lệ, không log lộ ra phía caller.
+
+    Test này dựng một session độc lập kiểu "của caller", thêm một hàng
+    TokenLedger CHƯA COMMIT vào đó (đại diện cho một thay đổi nghiệp vụ khác
+    caller chưa kịp lưu), gọi `service.run()` thành công, rồi xác nhận từ
+    một session THỨ BA (không liên quan) rằng hàng đó VẪN CHƯA có trong CSDL.
+
+    Test này đã được xác nhận ĐỎ trước khi sửa: gọi phiên bản cũ của
+    `run(session, user_id, task, prompt)` với chính `session_cua_caller` này
+    khiến hàng "của caller" bị commit lặng lẽ (xác nhận bằng script A/B thủ
+    công, xem báo cáo Task 19) — record_usage() còn tự log CẢNH BÁO
+    "session đang có thay đổi chưa lưu" ngay tại thời điểm đó, đúng như
+    docstring của nó mô tả, nhưng dòng log đó không cứu được dữ liệu.
+    """
+    async with session_factory() as session_cua_caller:
+        user_id_caller = uuid.uuid4()
+        hang_cua_caller = TokenLedger(
+            user_id=user_id_caller,
+            task=TaskType.NORMALIZE_GOAL.value,
+            provider="khong-lien-quan",
+            model="khong-lien-quan-1",
+            input_tokens=1,
+            output_tokens=1,
+            attempts=1,
+            succeeded=True,
+        )
+        session_cua_caller.add(hang_cua_caller)
+        assert session_cua_caller.new, "tiền đề của test: session còn thay đổi chưa lưu"
+
+        service = LLMService({"gemini": FakeProvider(name="gemini", responses=[_GOAL_JSON])}, redis)
+        ket_qua = await service.run(uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")
+        assert isinstance(ket_qua, NormalizedGoal)
+
+        async with session_factory() as session_doc_lai:
+            hang_da_luu = await session_doc_lai.scalar(
+                select(TokenLedger).where(TokenLedger.user_id == user_id_caller)
+            )
+        assert hang_da_luu is None, (
+            "Hàng chưa commit của caller đã bị commit lặng lẽ như tác dụng phụ của run() "
+            "— run() không được dùng session của caller để ghi sổ."
+        )
