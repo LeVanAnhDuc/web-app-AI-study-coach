@@ -59,3 +59,19 @@ class ProviderUnavailable(LLMError):
 
 class SchemaViolation(LLMError):
     """Đã retry đủ số lần mà đầu ra vẫn không khớp schema."""
+
+
+class AllProvidersFailed(LLMError):
+    """Mọi nhà cung cấp trong chuỗi định tuyến (Task 18) đều hỏng cho tác vụ này.
+
+    `usages` gom usage của MỌI lần gọi đã thực hiện trước khi cả chuỗi thất
+    bại — kể cả các nhà cung cấp dự phòng đã tự thử và tự hỏng. Mỗi lần gọi
+    một nhà cung cấp tốn token thật trong hạn mức miễn phí dù kết quả cuối
+    cùng là thất bại; bỏ sót các lần thử đó khi không có kết quả trả về cho
+    người dùng sẽ khiến sổ token (Task 19) đánh giá THẤP HƠN mức tiêu thụ
+    thật, đúng hướng nguy hiểm mà `ledger.record_usage()` đã cảnh báo.
+    """
+
+    def __init__(self, message: str = "", usages: list[Usage] | None = None) -> None:
+        super().__init__(message)
+        self.usages: list[Usage] = usages if usages is not None else []

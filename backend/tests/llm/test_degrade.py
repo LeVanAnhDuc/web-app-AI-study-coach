@@ -85,6 +85,18 @@ async def test_het_luot_thu_lai_thi_nem_schema_violation():
 
 
 @pytest.mark.asyncio
+async def test_schema_violation_mang_usage_cua_moi_lan_thu():
+    # Ruling C-2 (kế hoạch): SchemaViolation phải mang usages của MỌI lần
+    # thử (kể cả lần thất bại) — tầng định tuyến (Task 18) đọc usages từ
+    # chính ngoại lệ này khi rơi xuống nhà cung cấp dự phòng, và sổ token
+    # (Task 19) không được phép bỏ sót các lần đã tốn token thật.
+    provider = FakeProvider(responses=["hong", "van hong", "hong nua"])
+    with pytest.raises(SchemaViolation) as exc_info:
+        await complete_structured(provider, _spec(), ThuNghiem, max_retries=2)
+    assert len(exc_info.value.usages) == 3
+
+
+@pytest.mark.asyncio
 async def test_provider_thieu_structured_output_thi_them_chi_dan_json():
     provider = FakeProvider(capabilities=frozenset(), responses=['{"ten": "An", "tuoi": 20}'])
     await complete_structured(provider, _spec(), ThuNghiem)

@@ -119,10 +119,17 @@ async def complete_structured(
                 ),
             )
 
-    raise SchemaViolation(
+    loi = SchemaViolation(
         f"{provider.name} không trả được JSON khớp schema sau "
         f"{max_retries + 1} lần thử. Lỗi cuối: {loi_cuoi}"
     )
+    # Gắn usages của TỪNG lần thử (kể cả các lần sai schema) vào chính ngoại
+    # lệ trước khi ném: tầng định tuyến (Task 18) rơi xuống provider dự
+    # phòng khi gặp SchemaViolation, và nếu không đọc được usages từ đây thì
+    # các lần gọi đã tốn token thật của provider vừa hỏng sẽ biến mất khỏi
+    # sổ token, dù chúng đã tiêu hạn mức miễn phí thật sự.
+    loi.usages = usages
+    raise loi
 
 
 def _tom_tat_loi(exc: ValidationError) -> str:
