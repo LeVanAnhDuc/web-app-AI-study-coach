@@ -7,6 +7,16 @@ bị mất chỉ làm sai số liệu báo cáo, không làm thủng lá chắn 
 chính là lý do Ruling 3 (ghi thất bại không được huỷ kết quả LLM đã thành
 công) không mâu thuẫn với Ruling 1 (phải ghi mọi lần thử).
 
+GIỚI HẠN CỦA LẬP LUẬN TRÊN, ghi rõ để không ai dựa vào nó quá mức: thùng token
+chỉ thực thi ngân sách theo PHÚT, không theo NGÀY (xem docstring ratelimit.py).
+Nên "mất một dòng sổ không làm thủng lá chắn" đúng với hạn mức phút, và CHỈ
+đúng với hạn mức phút. Với hạn mức NGÀY thì hiện chưa có lá chắn nào cả, và sổ
+này là nguồn dữ liệu DUY NHẤT để một bộ ngắt theo ngày trong tương lai đọc —
+tức là mỗi dòng bị mất sẽ trực tiếp làm bộ ngắt đó đếm thiếu. Ruling 3 vẫn
+đúng (huỷ một câu trả lời đã trả tiền vì lỗi ghi sổ là tệ hơn), nhưng lý do
+"mất một dòng là vô hại" thì không: nó chỉ vô hại HÔM NAY, khi chưa ai đọc sổ
+để ra quyết định. Xem mục hoãn cạnh `PROVIDER_RPM` trong routing.py.
+
 Không dùng đọc-sửa-ghi (SELECT tổng rồi UPDATE lại) để cộng dồn: hai lời gọi
 record_usage() chạy đồng thời có thể cùng đọc một tổng cũ rồi cùng ghi đè,
 làm mất một trong hai lần cộng — đúng lớp lỗi đã gặp hai lần trong dự án này

@@ -65,15 +65,28 @@ class GeminiProvider:
         if response.status_code == 429:
             # Google trả RESOURCE_EXHAUSTED kèm chữ "quota" cho CẢ giới hạn theo
             # phút (RPM) lẫn hết hạn mức thật theo ngày — không thể phân biệt
-            # hai trường hợp chỉ bằng từ "quota". Hai hướng sai lệch ở đây BẤT
-            # ĐỐI XỨNG nghiêm trọng: đoán nhầm thành RateLimited chỉ tốn một lần
-            # chờ rồi router rơi xuống provider khác, Gemini vẫn được thử lại
-            # sau; đoán nhầm thành QuotaExhausted khiến router bỏ hẳn Gemini cho
-            # tới hết ngày — và Gemini là provider miễn phí DUY NHẤT ép được
-            # JSON Schema gốc, nên mất nó là mất cả khả năng ép schema hôm đó.
-            # Vì vậy mặc định LUÔN nghiêng về RateLimited; chỉ khi có bằng chứng
-            # rõ ràng về "theo ngày" mới coi là QuotaExhausted. KHÔNG "dọn gọn"
-            # điều kiện này về dạng đối xứng — sự bất đối xứng là chủ đích.
+            # hai trường hợp chỉ bằng từ "quota".
+            #
+            # HÔM NAY HAI LỚP NÀY ĐƯỢC XỬ LÝ HỆT NHAU. `QuotaExhausted` xuất
+            # hiện ở ĐÚNG MỘT chỗ trong toàn bộ mã: là một trong bốn thành viên
+            # của `_DUOC_PHEP_ROI_XUONG` (routing.py) — y như `RateLimited`. Nên
+            # KHÔNG có cơ chế nào khiến router bỏ hẳn Gemini cho tới hết ngày;
+            # lượt gọi kế tiếp vẫn thử Gemini bình thường. Đã đo: qua ba lượt
+            # liên tiếp, Gemini bị gọi lại đủ ba lần sau khi trả `QuotaExhausted`.
+            # Nếu bạn đang đọc chú thích này để tìm bộ ngắt theo ngày, nó CHƯA
+            # TỒN TẠI — xem mục hoãn ghi cạnh `PROVIDER_RPM` trong routing.py.
+            #
+            # VẬY VÌ SAO VẪN TÁCH HAI LỚP? Vì việc phân loại là chỗ DUY NHẤT có
+            # đủ thông tin để phân biệt (thân lỗi của provider chỉ đọc được ở
+            # đây), còn bộ nhớ hạn-mức-theo-ngày sẽ được thêm ở tầng định tuyến.
+            # Gộp hai lớp lại hôm nay sẽ ném đi thông tin không lấy lại được, và
+            # người làm bộ ngắt đó sẽ phải dựng lại chính đoạn phân loại này.
+            # Mặc định nghiêng về `RateLimited` cũng được GIỮ, dù hôm nay hai
+            # nhánh tương đương: nó là mặc định đúng cho ngày bộ ngắt tồn tại
+            # (đoán nhầm thành `RateLimited` chỉ tốn một lượt gọi; đoán nhầm
+            # thành `QuotaExhausted` lúc đó mới thật sự mất Gemini cả ngày — và
+            # Gemini là provider miễn phí DUY NHẤT ép được JSON Schema gốc).
+            # KHÔNG "dọn gọn" điều kiện này về dạng đối xứng.
             if _co_bang_chung_het_han_muc_ngay(response.text):
                 raise QuotaExhausted("gemini: hết hạn mức theo ngày")
             raise RateLimited(

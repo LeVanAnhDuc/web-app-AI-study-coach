@@ -104,13 +104,22 @@ class OpenAICompatProvider:
             thong_bao_loi = _trich_thong_bao_loi(response)
             if self._la_het_han_muc_ngay(thong_bao_loi):
                 raise QuotaExhausted(f"{self.name}: hết hạn mức")
-            # Bất đối xứng CHỦ ĐÍCH (giống ruling ở Gemini): đoán nhầm thành
-            # RateLimited chỉ tốn một lần chờ rồi được thử lại; đoán nhầm
-            # thành QuotaExhausted khiến router bỏ hẳn provider này cho tới
-            # hết cả cửa sổ hạn mức. Vì vậy mặc định LUÔN là RateLimited khi
-            # không có bằng chứng theo ngày — nhánh này nằm NGAY TẠI ĐÂY
-            # (không giấu trong hàm phụ) để một lần sửa _la_het_han_muc_ngay
-            # sau này không thể vô tình đảo ngược nhánh nào là nhánh an toàn.
+            # HÔM NAY `QuotaExhausted` VÀ `RateLimited` ĐƯỢC XỬ LÝ HỆT NHAU:
+            # cả hai chỉ là hai trong bốn thành viên của `_DUOC_PHEP_ROI_XUONG`
+            # (routing.py), nên KHÔNG có cơ chế nào bỏ hẳn provider này cho tới
+            # hết cửa sổ hạn mức — lượt gọi kế tiếp vẫn thử nó bình thường. Bộ
+            # ngắt theo ngày CHƯA TỒN TẠI; xem mục hoãn ghi cạnh `PROVIDER_RPM`
+            # trong routing.py.
+            #
+            # Việc TÁCH hai lớp vẫn được giữ vì đây là chỗ DUY NHẤT đọc được
+            # thân lỗi của provider, tức chỗ duy nhất phân biệt được — gộp lại
+            # hôm nay là ném đi thông tin mà bộ nhớ hạn-mức-theo-ngày sau này
+            # cần. Và mặc định nghiêng về `RateLimited` được giữ vì nó là mặc
+            # định đúng cho ngày bộ ngắt đó tồn tại (bất đối xứng CHỦ ĐÍCH,
+            # giống ruling ở Gemini), không phải vì nó tạo khác biệt hôm nay.
+            # Nhánh này nằm NGAY TẠI ĐÂY (không giấu trong hàm phụ) để một lần
+            # sửa `_la_het_han_muc_ngay` sau này không thể vô tình đảo ngược
+            # nhánh nào là nhánh an toàn.
             raise RateLimited(
                 f"{self.name}: bị giới hạn tần suất",
                 retry_after=_doc_retry_after(response),

@@ -123,6 +123,36 @@ ROUTING: dict[TaskType, tuple[str, ...]] = {
 # một task riêng đối chiếu định kỳ, không chỉ kiểm một lần rồi tin mãi.
 PROVIDER_RPM: dict[str, int] = {"gemini": 10, "groq": 25, "mistral": 25}
 
+# HOÃN CÓ CHỦ ĐÍCH, ghi ở đây vì đây là chỗ người đọc sẽ tìm nó: KHÔNG CÓ bộ
+# ngắt theo NGÀY trong M1. Bảng trên chỉ khai hạn mức theo PHÚT, và thùng token
+# (ratelimit.py) chỉ thực thi được theo phút — với `capacity=rpm` và
+# `refill=rpm/60` mỗi giây, trạng thái dừng cho qua khoảng 14.400 request
+# Gemini mỗi ngày ở `rpm=10`, tức cao hơn hẳn mọi hạn mức ngày hợp lý. Hệ quả
+# đo được: `QuotaExhausted` hôm nay hành xử HỆT `RateLimited` — nó chỉ là một
+# trong bốn thành viên của `_DUOC_PHEP_ROI_XUONG` ngay dưới đây, và không chỗ
+# nào khác trong mã đọc nó. Việc dùng đều đặn suốt ngày làm cạn hạn mức ngày
+# hiện KHÔNG có gì canh.
+#
+# Để dựng bộ ngắt đó cần đúng bốn thứ, không nhiều hơn:
+#   1. `PROVIDER_RPD` (request mỗi NGÀY) đặt cạnh bảng trên, cùng cảnh báo
+#      "chưa kiểm chứng với trang tài liệu free tier".
+#   2. Một khoá Redis theo ngày cho mỗi nhà cung cấp (vd
+#      `llm:rpd:{provider}:{ngày-UTC}`) với `EXPIRE` qua nửa đêm — dùng UTC,
+#      không dùng giờ địa phương, vì hai tiến trình ở hai múi giờ sẽ tự thấy
+#      hai "hôm nay" khác nhau và cùng tưởng mình còn hạn mức.
+#   3. Một BỘ NHỚ cho `QuotaExhausted`: khi một nhà cung cấp trả lớp lỗi đó,
+#      ghi cờ vào khoá theo ngày ở (2) để các lượt sau BỎ QUA nhà cung cấp ấy
+#      tới hết ngày. Đây là chỗ duy nhất việc tách `QuotaExhausted` khỏi
+#      `RateLimited` (xem chú thích 429 trong gemini.py và openai_compat.py)
+#      thật sự sinh ra khác biệt hành vi — nên ĐỪNG gộp hai lớp lại trước khi
+#      làm việc này, sẽ phải dựng lại đúng đoạn phân loại đó.
+#   4. Quyết định "bỏ qua tới hết ngày" phải là BỎ QUA (như nhánh
+#      `provider is None` bên dưới), KHÔNG phải một lần thử rồi hỏng — mục
+#      đích là không tốn lượt gọi, nên nó phải chặn TRƯỚC khi hỏi thùng.
+# Chưa đủ dữ liệu thật để chọn con số cho (1) — đó là lý do việc này chờ báo
+# cáo của `scripts/measure_json_compliance.py`, không phải vì nó không quan
+# trọng.
+
 # Nguyên tắc 1 và 2: CHỈ bốn lớp này được coi là "nhà cung cấp đã từ chối,
 # thử nhà cung cấp kế tiếp". Cố ý KHÔNG có RateLimiterUnavailable — nó là
 # LLMError nhưng KHÔNG nằm trong tuple này, nên nó rơi xuống khối

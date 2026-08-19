@@ -3,8 +3,15 @@
 Hạn mức miễn phí của mỗi nhà cung cấp nhỏ, cứng, và dùng chung cho mọi người
 dùng thật của ứng dụng — vượt hạn mức có thể khiến khoá bị nhà cung cấp khoá
 hoặc chặn tạm thời cho TẤT CẢ mọi người, không chỉ người gây ra vượt hạn mức.
-Module này là lá chắn duy nhất đứng giữa một cơn dồn dập (hoặc một vòng lặp
-lỗi) và một ngày không còn LLM nào dùng được.
+
+PHẠM VI CHÍNH XÁC CỦA LÁ CHẮN NÀY: nó chặn theo PHÚT, không theo NGÀY. Với
+`capacity=rpm` và `refill=rpm/60` mỗi giây, trạng thái dừng cho qua đúng `rpm`
+request mỗi phút — tức khoảng 14.400 request Gemini mỗi ngày ở `rpm=10`, cao
+hơn hẳn mọi hạn mức ngày hợp lý. Nghĩa là module này chặn được một cơn dồn dập
+hoặc một vòng lặp lỗi tức thời, nhưng KHÔNG chặn được việc dùng đều đặn suốt
+ngày làm cạn hạn mức ngày. Đừng đọc nó như "lá chắn duy nhất đứng giữa ứng dụng
+và một ngày không còn LLM": phần theo-ngày CHƯA CÓ AI CANH — xem mục hoãn ghi
+cạnh `PROVIDER_RPM` trong routing.py để biết nó cần gì.
 
 Việc kiểm-và-trừ token nằm trong một script Lua (_LUA) chạy nguyên tử trên
 Redis — xem docstring của TokenBucket để biết vì sao KHÔNG được tách thành một

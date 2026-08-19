@@ -59,6 +59,28 @@ class Settings(BaseSettings):
 
     database_url: str
     redis_url: str
+    # HOÃN, kèm CẢNH BÁO VỀ CÁCH LÀM: chưa có kiểm độ dài tối thiểu cho
+    # `jwt_secret` (nên là >= 32 byte). Khi thêm, PHẢI viết bằng mã kiểm THƯỜNG
+    # trong `get_settings()` — TUYỆT ĐỐI KHÔNG dùng `Field(min_length=32)` hay
+    # `field_validator`.
+    #
+    # Lý do đã kiểm chứng bằng thực nghiệm: `ValidationError` của pydantic DỘI
+    # NGUYÊN VĂN giá trị vi phạm vào `str(exc)`, nên một validator độ dài sẽ ghi
+    # chính `jwt_secret` vào thông báo lỗi — và thông báo đó đi vào log khởi
+    # động, vào stderr của container, vào công cụ theo dõi lỗi. Đây đúng cùng
+    # một dạng lỗ với việc FastAPI serialise `input` vào thân 422 (xem
+    # `_an_khoa_nhay_cam` trong app/main.py): cùng một bài học ở hai thư viện,
+    # nên phát biểu thành nguyên tắc — KHÔNG BAO GIỜ kiểm một giá trị bí mật
+    # bằng validator của pydantic/FastAPI.
+    #
+    # Tiền lệ ĐÚNG đã có sẵn trong file này: `_kiem_tra_hinh_dang_khoa_goc()`
+    # kiểm `llm_key_encryption_key` bằng mã thường và tự soạn thông báo (chỉ nêu
+    # SỐ BYTE, không nêu giá trị). Sao theo đúng hình dạng đó.
+    #
+    # Điều đáng giữ lại của câu chuyện này: chính việc HOÃN validator đã tình cờ
+    # tránh được lỗ rò — cách hiển nhiên nhất để "làm cho xong" ở đây lại là
+    # cách tạo ra lỗ. Nếu không ghi lại, người làm sau sẽ chọn đúng cách hiển
+    # nhiên đó.
     jwt_secret: str
     jwt_access_ttl_seconds: int = 900
     jwt_refresh_ttl_seconds: int = 60 * 60 * 24 * 30

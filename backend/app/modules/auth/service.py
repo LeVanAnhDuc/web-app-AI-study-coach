@@ -120,6 +120,30 @@ async def rotate_refresh_token(session: AsyncSession, raw_token: str) -> tuple[U
     if user_id is None:
         # Không tồn tại, đã bị thu hồi, đã hết hạn, hoặc vừa bị một request đồng thời
         # khác chiếm mất — bốn trường hợp này không thể phân biệt được với người gọi.
+        #
+        # HOÃN, và là một khoảng trống BẢO MẬT chứ không phải một tính năng còn
+        # thiếu: khi token được trình ra là một token ĐÃ BỊ THU HỒI (không phải
+        # hết hạn, không phải không tồn tại), đó là TÍN HIỆU BỊ ĐÁNH CẮP. Xoay
+        # vòng refresh token nghĩa là mỗi token chỉ dùng được ĐÚNG MỘT LẦN, nên
+        # một token đã thu hồi được trình lại có đúng hai cách giải thích: hoặc
+        # client hợp lệ đã dùng nó rồi và có ai KHÁC đang giữ bản copy, hoặc kẻ
+        # tấn công đã dùng nó trước và client hợp lệ đang trình lại. Cả hai đều
+        # có nghĩa là chuỗi token của người dùng này đã bị người thứ hai chạm
+        # tới — và hôm nay ta chỉ từ chối ĐÚNG một request đó rồi để kẻ kia tiếp
+        # tục dùng những token khác của cùng người dùng.
+        #
+        # Việc phải làm: THU HỒI TOÀN BỘ refresh token còn hiệu lực của người
+        # dùng đó (một `UPDATE ... WHERE user_id = ... AND revoked_at IS NULL`),
+        # buộc mọi phiên đăng nhập lại. Hai chi tiết dễ làm sai:
+        #   - Chỉ kích hoạt khi token TỒN TẠI và ĐÃ BỊ THU HỒI. Token hết hạn
+        #     hoặc không tồn tại là chuyện thường ngày (thiết bị ngủ lâu, người
+        #     dùng xoá dữ liệu) — coi chúng là tín hiệu trộm sẽ tự đăng xuất
+        #     người dùng vô cớ. Nghĩa là phải thêm một truy vấn riêng để PHÂN
+        #     BIỆT bốn trường hợp mà `UPDATE` có điều kiện ở trên cố ý gộp lại.
+        #   - Thông báo trả về cho client PHẢI GIỮ NGUYÊN như hiện tại. Việc
+        #     phân biệt được thêm là để phía SERVER hành động, không bao giờ để
+        #     lộ ra ngoài rằng token đó "từng tồn tại" — làm vậy là biến chỗ này
+        #     thành một cái máy dò token hợp lệ.
         raise InvalidRefreshToken()
 
     user = await session.get(User, user_id)
