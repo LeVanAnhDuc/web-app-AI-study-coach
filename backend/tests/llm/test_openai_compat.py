@@ -331,3 +331,62 @@ async def test_khoa_api_khong_lot_qua_moi_duong_loi(code, body, headers):
             await provider.complete(_spec())
         assert _KHOA_SENTINEL not in str(info.value)
         assert _KHOA_SENTINEL not in str(ghi_nhan["request"].url)
+
+
+# --- Mọi chỗ NÉM sau HTTP 200 đều đã bị tính tiền, nên phải mang usages (C-52) ---
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_length_mang_theo_usage_da_tinh_tien():
+    """`finish_reason="length"` nghĩa là TRỌN ngân sách output đã bị tiêu, và số
+    token nằm ngay trong khối `usage` của cùng thân phản hồi.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: ĐỎ — `exc.usages` là `[]` nên `usages[0]` ném
+    `IndexError`.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"domain": "we'}, "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 700, "completion_tokens": 512},
+            },
+        )
+
+    with pytest.raises(ProviderUnavailable) as info:
+        await _gan_transport(GroqProvider(api_key="k", model="groq-test"), handler).complete(
+            _spec()
+        )
+    assert len(info.value.usages) == 1
+    assert info.value.usages[0].output_tokens == 512
+    assert info.value.usages[0].input_tokens == 700
+    assert info.value.usages[0].provider == "groq"
+
+
+@pytest.mark.asyncio
+async def test_khong_co_choice_nao_van_mang_theo_usage():
+    """Nhánh "phản hồi không có nội dung". ĐỎ trước khi sửa."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [], "usage": {"prompt_tokens": 55, "completion_tokens": 0}},
+        )
+
+    with pytest.raises(ProviderUnavailable) as info:
+        await _gan_transport(MistralProvider(api_key="k", model="m"), handler).complete(_spec())
+    assert info.value.usages[0].input_tokens == 55
+
+
+@pytest.mark.asyncio
+async def test_than_200_khong_phai_json_thi_khong_bia_ra_usage():
+    """GHIM CHỦ ĐÍCH (bản cũ cũng xanh): thân 200 không parse được thì số token
+    là KHÔNG THỂ BIẾT — ghim `usages == []` để không ai bịa ra `Usage(0, 0)`."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"khong phai json")
+
+    with pytest.raises(ProviderUnavailable) as info:
+        await _gan_transport(GroqProvider(api_key="k", model="m"), handler).complete(_spec())
+    assert info.value.usages == []

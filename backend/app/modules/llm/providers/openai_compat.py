@@ -130,13 +130,26 @@ class OpenAICompatProvider:
             # là ValueError, KHÔNG nằm trong cây LLMError — nếu lọt ra ngoài,
             # nó thoát khỏi fallthrough của router (Task 18) và biến thành
             # lỗi 500 thay vì rơi xuống provider dự phòng.
+            #
+            # CỐ Ý KHÔNG kèm `usages`: lượt này ĐÃ bị tính tiền (HTTP 200) nhưng
+            # số token nằm trong chính thân không đọc được — bịa một
+            # `Usage(0, 0)` sẽ ghi vào sổ một con số SAI trông như đã đo, còn để
+            # trống là nói đúng rằng không biết. Omission CÓ CHỦ ĐÍCH.
             raise ProviderUnavailable(
                 f"{self.name}: thân phản hồi không phải JSON hợp lệ"
             ) from None
 
+        # TỪ ĐÂY TRỞ XUỐNG lượt gọi đã bị TÍNH TIỀN TRỌN VẸN (HTTP 200 + thân
+        # JSON đọc được), kể cả khi kết quả không dùng được. Đọc usage NGAY,
+        # TRƯỚC mọi chỗ ném, rồi gắn vào `LLMError.usages` (C-52): thiếu bước
+        # này thì một lượt `finish_reason="length"` — đã tiêu TRỌN ngân sách
+        # output — không sinh dòng nào trong sổ token, và số liệu báo cáo trôi
+        # xuống dưới mức tiêu thụ thật.
+        usage = self._doc_usage(data)
+
         choices = data.get("choices") or []
         if not choices:
-            raise ProviderUnavailable(f"{self.name}: phản hồi không có nội dung")
+            raise ProviderUnavailable(f"{self.name}: phản hồi không có nội dung", usages=[usage])
 
         choice = choices[0]
         # finish_reason khác "stop" (vd. "length" khi hết token, hoặc
@@ -148,16 +161,23 @@ class OpenAICompatProvider:
         finish_reason = choice.get("finish_reason")
         if finish_reason is not None and finish_reason != "stop":
             raise ProviderUnavailable(
-                f"{self.name}: dừng sinh nội dung bất thường ({finish_reason})"
+                f"{self.name}: dừng sinh nội dung bất thường ({finish_reason})", usages=[usage]
             )
 
         text = (choice.get("message") or {}).get("content") or ""
-        usage = data.get("usage") or {}
-        return text, Usage(
+        return text, usage
+
+    def _doc_usage(self, data: dict) -> Usage:
+        """Đọc số token từ khối `usage`. Tách thành hàm riêng vì cả đường THÀNH
+        CÔNG và mọi đường NÉM sau HTTP 200 đều phải dùng đúng một cách đọc —
+        hai bản sao sẽ trôi lệch, và một lượt đã tính tiền lại không có usage là
+        đúng lớp lỗi đếm-thiếu âm thầm mà C-52 đã chống."""
+        khoi = data.get("usage") or {}
+        return Usage(
             provider=self.name,
             model=self.model,
-            input_tokens=int(usage.get("prompt_tokens", 0)),
-            output_tokens=int(usage.get("completion_tokens", 0)),
+            input_tokens=int(khoi.get("prompt_tokens", 0)),
+            output_tokens=int(khoi.get("completion_tokens", 0)),
         )
 
     def _la_het_han_muc_ngay(self, thong_bao_loi: str) -> bool:

@@ -425,3 +425,94 @@ async def test_khoa_api_khong_lot_qua_moi_duong_loi(code, body, headers):
         await provider.complete(_spec())
     assert _KHOA_SENTINEL not in str(info.value)
     assert _KHOA_SENTINEL not in str(ghi_nhan["request"].url)
+
+
+# --- Mọi chỗ NÉM sau HTTP 200 đều đã bị tính tiền, nên phải mang usages (C-52) ---
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_mang_theo_usage_da_tinh_tien():
+    """`finishReason=MAX_TOKENS` nghĩa là TRỌN ngân sách output đã bị tiêu, và
+    số token nằm ngay trong `usageMetadata` của cùng thân phản hồi. Ngoại lệ
+    phải mang nó đi, nếu không router/facade không có gì để ghi sổ và 1312
+    token biến mất khỏi báo cáo.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: ĐỎ — `exc.usages` là `[]` nên `usages[0]` ném
+    `IndexError`.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": '{"domain": "we'}]},
+                        "finishReason": "MAX_TOKENS",
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 800, "candidatesTokenCount": 512},
+            },
+        )
+
+    with pytest.raises(ProviderUnavailable) as info:
+        await _provider(handler).complete(_spec())
+    assert len(info.value.usages) == 1
+    assert info.value.usages[0].output_tokens == 512
+    assert info.value.usages[0].input_tokens == 800
+    assert info.value.usages[0].provider == "gemini"
+    assert info.value.usages[0].model == "gemini-test"
+
+
+@pytest.mark.asyncio
+async def test_prompt_bi_chan_mang_theo_usage_da_tinh_tien():
+    """Prompt bị chặn (`blockReason`) vẫn tiêu trọn token prompt — Google đã
+    đọc và xử lý prompt trước khi từ chối. ĐỎ trước khi sửa."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [],
+                "promptFeedback": {"blockReason": "SAFETY"},
+                "usageMetadata": {"promptTokenCount": 640, "candidatesTokenCount": 0},
+            },
+        )
+
+    with pytest.raises(ProviderUnavailable) as info:
+        await _provider(handler).complete(_spec())
+    assert info.value.usages[0].input_tokens == 640
+
+
+@pytest.mark.asyncio
+async def test_khong_co_candidate_nao_van_mang_theo_usage():
+    """Nhánh "không có nội dung" mà cũng không có `blockReason`. ĐỎ trước khi sửa."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [],
+                "usageMetadata": {"promptTokenCount": 77, "candidatesTokenCount": 0},
+            },
+        )
+
+    with pytest.raises(ProviderUnavailable) as info:
+        await _provider(handler).complete(_spec())
+    assert info.value.usages[0].input_tokens == 77
+
+
+@pytest.mark.asyncio
+async def test_than_200_khong_phai_json_thi_khong_bia_ra_usage():
+    """GHIM CHỦ ĐÍCH (không phải test phân biệt hồi quy — bản cũ cũng xanh):
+    khi thân 200 không parse được, số token là KHÔNG THỂ BIẾT. Ghim `usages ==
+    []` để không ai "hoàn thiện" chỗ này bằng một `Usage(0, 0)` bịa ra — một
+    dòng sổ "đã gọi, tiêu 0 token" là con số SAI trông như số đã đo, tệ hơn
+    việc thiếu dòng."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"khong phai json")
+
+    with pytest.raises(ProviderUnavailable) as info:
+        await _provider(handler).complete(_spec())
+    assert info.value.usages == []

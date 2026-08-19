@@ -96,16 +96,34 @@ class GeminiProvider:
             # nằm trong cây LLMError — nếu để lọt ra ngoài, nó thoát khỏi toàn bộ
             # thiết kế fallthrough của router (Task 18) và biến thành lỗi 500
             # thay vì rơi xuống provider khác.
+            #
+            # CỐ Ý KHÔNG kèm `usages`: lượt này ĐÃ bị tính tiền (HTTP 200), nhưng
+            # số token nằm trong chính thân phản hồi không đọc được — bịa một
+            # `Usage(0, 0)` sẽ ghi vào sổ một dòng "đã gọi, tiêu 0 token", tức
+            # một con số SAI trông như số đã đo; để trống là nói đúng rằng không
+            # biết. Đây là omission CÓ CHỦ ĐÍCH, không phải chỗ bị bỏ quên.
             raise ProviderUnavailable("gemini: thân phản hồi không phải JSON hợp lệ") from None
+
+        # TỪ ĐÂY TRỞ XUỐNG, lượt gọi đã được provider TÍNH TIỀN TRỌN VẸN (HTTP
+        # 200 + thân JSON đọc được), kể cả khi kết quả không dùng được. Đọc usage
+        # NGAY, TRƯỚC mọi chỗ ném, rồi gắn vào `LLMError.usages` (khai ở gốc cây,
+        # xem types.LLMError — C-52): thiếu bước này thì một lượt `MAX_TOKENS`
+        # (tiêu TRỌN ngân sách output) hay một prompt bị chặn vì SAFETY (tiêu
+        # trọn token prompt) không sinh dòng nào trong sổ token, và số liệu báo
+        # cáo trôi xuống dưới mức tiêu thụ thật — đúng chiều nguy hiểm mà
+        # `ledger.record_usage()` đã cảnh báo. Các số này nằm sẵn trong `data`,
+        # cách chỗ ném đúng một dòng.
+        usage = self._doc_usage(data)
 
         candidates = data.get("candidates") or []
         if not candidates:
             ly_do_chan = data.get("promptFeedback", {}).get("blockReason")
             if ly_do_chan:
                 raise ProviderUnavailable(
-                    f"gemini: phản hồi không có nội dung (prompt bị chặn: {ly_do_chan})"
+                    f"gemini: phản hồi không có nội dung (prompt bị chặn: {ly_do_chan})",
+                    usages=[usage],
                 )
-            raise ProviderUnavailable("gemini: phản hồi không có nội dung")
+            raise ProviderUnavailable("gemini: phản hồi không có nội dung", usages=[usage])
 
         candidate = candidates[0]
         # finishReason khác STOP (SAFETY, MAX_TOKENS, RECITATION, ...) nghĩa là
@@ -114,7 +132,9 @@ class GeminiProvider:
         # rồi báo sai nguyên nhân thành "sai schema".
         finish_reason = candidate.get("finishReason")
         if finish_reason is not None and finish_reason != "STOP":
-            raise ProviderUnavailable(f"gemini: dừng sinh nội dung bất thường ({finish_reason})")
+            raise ProviderUnavailable(
+                f"gemini: dừng sinh nội dung bất thường ({finish_reason})", usages=[usage]
+            )
 
         # .get("content", {}) chỉ trả default khi khoá VẮNG MẶT; nếu khoá tồn
         # tại với giá trị null (Gemini có thể trả vậy khi finishReason bất
@@ -123,8 +143,15 @@ class GeminiProvider:
         parts = (candidate.get("content") or {}).get("parts") or []
         text = "".join(part.get("text", "") for part in parts)
 
-        meta = data.get("usageMetadata", {})
-        return text, Usage(
+        return text, usage
+
+    def _doc_usage(self, data: dict) -> Usage:
+        """Đọc số token từ `usageMetadata`. Tách thành hàm riêng vì cả đường
+        THÀNH CÔNG và mọi đường NÉM sau HTTP 200 đều phải dùng đúng một cách
+        đọc — hai bản sao sẽ trôi lệch, và một lượt đã tính tiền lại không có
+        usage là đúng lớp lỗi đếm-thiếu âm thầm mà C-52 đã chống."""
+        meta = data.get("usageMetadata") or {}
+        return Usage(
             provider=self.name,
             model=self.model,
             input_tokens=int(meta.get("promptTokenCount", 0)),
