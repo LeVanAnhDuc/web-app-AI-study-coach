@@ -15,7 +15,7 @@ import sys
 import pytest
 
 from app.config import get_settings
-from app.modules.llm.fixtures import FixtureProvider, fixture_key
+from app.modules.llm.fixtures import FixtureMissing, FixtureProvider, fixture_key
 from app.modules.llm.registry import REGISTRY
 from app.modules.llm.schema_util import to_provider_schema
 from app.modules.llm.service import build_providers
@@ -363,21 +363,28 @@ async def test_do_lan_dau_hoat_dong_qua_fixture_replay_khong_dung_mang(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_do_lan_dau_dem_fixture_thieu_la_loi_ha_tang_khong_lam_no_vong_lap(tmp_path):
-    """FixtureMissing (app.modules.llm.fixtures) là một LLMError, KHÔNG phải
-    RateLimited/QuotaExhausted/ProviderUnavailable — trước khi bắt LLMError
-    rộng, một cặp (provider × tác vụ) thiếu fixture sẽ ném lỗi lọt thẳng ra
-    ngoài, làm nổ toàn bộ vòng lặp đo các cặp còn lại trong chay(). Đây là
-    hành vi mong muốn: một lượt đo bị mất, không phải một crash toàn cục.
+async def test_do_lan_dau_khong_nuot_fixture_thieu_ma_de_no_lot_len(tmp_path):
+    """FixtureMissing (app.modules.llm.fixtures) là một LLMError, nhưng KHÔNG
+    được đếm vào loi_ha_tang: ở chế độ replay, fixture thiếu LUÔN LUÔN là
+    lỗi thao tác (bộ fixture không đầy đủ), không phải một provider bận —
+    đếm nó vào loi_ha_tang sẽ khiến một bộ fixture HỎNG trông giống hệt một
+    provider bị giới hạn tần suất trong báo cáo cuối cùng. do_mot_cap_tho
+    phải để nó lọt lên nguyên vẹn, không bị bắt/nuốt ở đây.
     """
     provider_thieu_fixture = FixtureProvider(
         FakeProvider(name="gemini", model="m"), mode="replay", directory=tmp_path
     )
-    ket_qua = await do_mot_cap_tho(provider_thieu_fixture, TaskType.NORMALIZE_GOAL, so_lan=2)
-    assert ket_qua.loi_ha_tang == 2
-    assert ket_qua.khop_schema == 0
-    assert ket_qua.sai_schema == 0
-    assert ket_qua.so_mau == 2
+    with pytest.raises(FixtureMissing):
+        await do_mot_cap_tho(provider_thieu_fixture, TaskType.NORMALIZE_GOAL, so_lan=2)
+
+
+@pytest.mark.asyncio
+async def test_do_sau_ha_cap_khong_nuot_fixture_thieu_ma_de_no_lot_len(tmp_path):
+    provider_thieu_fixture = FixtureProvider(
+        FakeProvider(name="gemini", model="m"), mode="replay", directory=tmp_path
+    )
+    with pytest.raises(FixtureMissing):
+        await do_mot_cap_sau_ha_cap(provider_thieu_fixture, TaskType.NORMALIZE_GOAL, so_lan=1)
 
 
 # --- do_mot_cap_sau_ha_cap: con số RIÊNG, đi qua toàn bộ tầng hạ cấp ---
@@ -532,3 +539,98 @@ async def test_chay_toan_bo_qua_fixture_replay_ghi_bao_cao_ra_file(tmp_path):
         assert task.value in noi_dung
     assert "Khuyến nghị" in noi_dung
     assert "gemini-fake-model" in noi_dung
+
+
+@pytest.mark.asyncio
+async def test_chay_that_bai_ro_rang_khi_thieu_fixture_o_che_do_replay(tmp_path, capsys):
+    """Ruling 4 + review: một bộ fixture THIẾU ở chế độ replay phải làm
+    chay() dừng ngay, nêu rõ provider/tác vụ, KHÔNG ghi báo cáo — trước bản
+    sửa này, do_mot_cap_tho đếm FixtureMissing vào loi_ha_tang, khiến một bộ
+    fixture HỎNG và một provider THẬT SỰ bị giới hạn tần suất tạo ra kết quả
+    byte-giống-hệt nhau (loi_ha_tang=so_mau, cùng dòng "chưa đo được")."""
+    settings = get_settings().model_copy(
+        update={
+            "gemini_api_key": "khoa-gia",
+            "groq_api_key": None,
+            "mistral_api_key": None,
+            "gemini_model": "gemini-fake-model",
+            "llm_fixture_mode": "replay",
+            "llm_fixture_dir": str(tmp_path / "fixtures_rong"),
+        }
+    )
+    thu_muc_bao_cao = tmp_path / "bao_cao"
+
+    with pytest.raises(SystemExit) as loi:
+        await chay(settings, so_lan=1, thu_muc_bao_cao=thu_muc_bao_cao)
+
+    assert loi.value.code == 1
+    assert not thu_muc_bao_cao.exists()
+    noi_dung_in_ra = capsys.readouterr().out
+    assert "fixture" in noi_dung_in_ra.lower()
+    assert "gemini" in noi_dung_in_ra
+    assert "normalize_goal" in noi_dung_in_ra
+
+
+@pytest.mark.asyncio
+async def test_chay_voi_nhieu_provider_gan_dung_hang_cho_tung_nha_cung_cap(tmp_path):
+    """Bẫy đã tái diễn trong milestone này: record_usage() (Task 15) từng âm
+    thầm gộp usage của nhiều provider làm một mà MỌI test một-provider vẫn
+    xanh. chay() là nơi DUY NHẤT gán mỗi Ket_qua cho đúng provider/model của
+    nó — dựng HAI provider, MỖI provider một model riêng và một bộ fixture
+    riêng, rồi kiểm mỗi (provider × tác vụ) có ĐÚNG MỘT dòng, mang ĐÚNG model
+    của chính provider đó, không lẫn tên model của provider kia.
+    """
+    thu_muc_fixture = tmp_path / "fixtures"
+    thu_muc_fixture.mkdir()
+
+    can_do = [t for t, spec in REGISTRY.items() if spec.response_model is not None]
+    model_theo_provider = {"gemini": "gemini-fake-multi", "groq": "groq-fake-multi"}
+
+    for ten_provider, model in model_theo_provider.items():
+        for task in can_do:
+            call = _spec_cho(task)
+            khoa = fixture_key(ten_provider, model, call)
+            (thu_muc_fixture / f"{khoa}.json").write_text(
+                json.dumps(
+                    {
+                        "task": task.value,
+                        "text": _JSON_HOP_LE_THEO_TAC_VU[task],
+                        "usage": {
+                            "provider": ten_provider,
+                            "model": model,
+                            "input_tokens": 5,
+                            "output_tokens": 5,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    settings = get_settings().model_copy(
+        update={
+            "gemini_api_key": "khoa-gia-gemini",
+            "groq_api_key": "khoa-gia-groq",
+            "mistral_api_key": None,
+            "gemini_model": model_theo_provider["gemini"],
+            "groq_model": model_theo_provider["groq"],
+            "llm_fixture_mode": "replay",
+            "llm_fixture_dir": str(thu_muc_fixture),
+        }
+    )
+
+    duong_dan = await chay(settings, so_lan=1, thu_muc_bao_cao=tmp_path / "bao_cao")
+    noi_dung = duong_dan.read_text(encoding="utf-8")
+
+    for ten_provider, model in model_theo_provider.items():
+        model_cua_provider_kia = model_theo_provider[
+            "groq" if ten_provider == "gemini" else "gemini"
+        ]
+        for task in can_do:
+            dong_khop = [
+                d
+                for d in noi_dung.splitlines()
+                if d.startswith(f"| {ten_provider} |") and f"| {task.value} |" in d
+            ]
+            assert len(dong_khop) == 1, (ten_provider, task, noi_dung)
+            assert model in dong_khop[0]
+            assert model_cua_provider_kia not in dong_khop[0]

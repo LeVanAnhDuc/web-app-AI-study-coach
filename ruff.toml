@@ -1,0 +1,14 @@
+# Cấu hình ruff Ở GỐC REPO — CHỈ để loại docs/ khỏi phạm vi khi ai đó lỡ chạy
+# `ruff format .` / `ruff check .` từ thư mục gốc thay vì từ backend/.
+#
+# docs/ chứa tài liệu kế hoạch/spec với các khối mã Python minh hoạ
+# (```python ... ```) — đó là VÍ DỤ MINH HOẠ trong văn bản, KHÔNG PHẢI mã
+# nguồn của dự án. `ruff format` có định dạng lại code fence trong Markdown,
+# và một lần chạy `ruff format .` từ gốc repo (Task 20) đã ghi đè nội dung
+# hai tài liệu kế hoạch/spec theo cách đó trước khi bị phát hiện qua
+# `git status` và hoàn tác — file này khiến việc đó không thể tái diễn.
+#
+# KHÔNG thêm quy tắc lint/format nào khác vào đây: cấu hình lint thật của dự
+# án chỉ có một bản duy nhất, ở backend/pyproject.toml — thêm gì ngoài
+# `exclude` ở đây sẽ tạo ra hai nguồn cấu hình có thể lệch nhau.
+exclude = ["docs"]

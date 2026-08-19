@@ -52,6 +52,7 @@ from pydantic import ValidationError
 
 from app.config import Settings, get_settings
 from app.modules.llm.degrade import complete_structured, extract_json
+from app.modules.llm.fixtures import FixtureMissing
 from app.modules.llm.providers.base import Provider
 from app.modules.llm.registry import REGISTRY
 from app.modules.llm.schema_util import to_provider_schema
@@ -194,12 +195,18 @@ async def do_mot_cap_tho(provider: Provider, task: TaskType, so_lan: int) -> Ket
     mọi provider, không phải một cách GIÚP provider trả lời đúng hơn, nên
     không vi phạm nguyên tắc "đo nguyên bản, không đo tầng an toàn".
 
-    Bắt `LLMError` RỘNG (không chỉ RateLimited/QuotaExhausted/ProviderUnavailable
-    của `Provider.complete()` thật): khi `provider` là một `FixtureProvider`
-    ở chế độ replay (Ruling 4 — đo qua fixture để không đụng mạng),
-    `FixtureMissing` cũng là một `LLMError` — thiếu fixture cho MỘT cặp
-    không được phép làm nổ cả vòng lặp đo những cặp còn lại; nó chỉ là một
-    lượt đo bị mất, giống hệt provider tự lỗi (xem docstring module)."""
+    Bắt `LLMError` RỘNG cho lỗi hạ tầng THẬT (RateLimited/QuotaExhausted/
+    ProviderUnavailable của `Provider.complete()` thật) — một lượt đo bị mất
+    vì provider bận, đúng ý nghĩa `loi_ha_tang` (xem docstring module).
+
+    `FixtureMissing` (app.modules.llm.fixtures) CỐ Ý KHÔNG bị bắt ở đây dù
+    nó cũng là một `LLMError`: khi `provider` là một `FixtureProvider` ở chế
+    độ replay, fixture thiếu LUÔN LUÔN là lỗi thao tác của người vận hành
+    (bộ fixture không đầy đủ), KHÔNG BAO GIỜ là một kết quả đo hợp lệ để
+    gộp vào `loi_ha_tang` — coi nó như provider bận sẽ tạo ra một báo cáo
+    TRÔNG như đo được một phần trong khi sự thật là cả lượt chạy đã hỏng.
+    Để nó lọt lên `chay()` (nơi có ngữ cảnh provider/tác vụ đang đo) để dừng
+    CẢ lượt chạy ngay, thay vì âm thầm tiếp tục rồi ghi báo cáo sai."""
     model_cls = REGISTRY[task].response_model
     assert model_cls is not None
     call = _spec_cho_tac_vu(task)
@@ -211,6 +218,8 @@ async def do_mot_cap_tho(provider: Provider, task: TaskType, so_lan: int) -> Ket
         bat_dau = monotonic()
         try:
             text, _usage = await provider.complete(call)
+        except FixtureMissing:
+            raise
         except LLMError:
             loi += 1
             tong_giay += monotonic() - bat_dau
@@ -245,7 +254,12 @@ async def do_mot_cap_sau_ha_cap(
     tốn nhiều hơn một lượt gọi provider bên trong nếu có thử lại — điều đó
     ĐÚNG với cách LLMService thật sự dùng tầng hạ cấp, nên đây chính là con
     số phản ánh trải nghiệm người dùng thật, KHÔNG được trộn với tỉ lệ
-    lần-đầu ở `do_mot_cap_tho` (ruling 1)."""
+    lần-đầu ở `do_mot_cap_tho` (ruling 1).
+
+    `FixtureMissing` CỐ Ý KHÔNG bị bắt vào `loi` — cùng lý do với
+    `do_mot_cap_tho` (xem docstring ở đó): fixture thiếu ở chế độ replay là
+    lỗi thao tác, không phải một kết quả đo, và phải lọt lên `chay()` để
+    dừng cả lượt chạy."""
     model_cls = REGISTRY[task].response_model
     assert model_cls is not None
     call = _spec_cho_tac_vu(task)
@@ -260,6 +274,8 @@ async def do_mot_cap_sau_ha_cap(
             khop += 1
         except SchemaViolation:
             sai += 1
+        except FixtureMissing:
+            raise
         except LLMError:
             loi += 1
         tong_giay += monotonic() - bat_dau
@@ -413,16 +429,34 @@ async def chay(
     for ten, provider in providers.items():
         in_an_toan(f"Đang đo {ten} (model={provider.model})…")
         for task in can_do:
-            hang = await do_mot_cap_tho(provider, task, so_lan)
-            if do_ca_sau_ha_cap:
-                # Bỏ qua thời gian đo-sau-hạ-cấp: Ket_qua.tong_giay chỉ đo lần-đầu,
-                # trộn chung hai khoảng thời gian đo hai thứ khác nhau vào một
-                # cột sẽ làm sai giay_tb báo cáo cho phép đo lần-đầu.
-                khop, sai, loi, _giay_sau_ha_cap = await do_mot_cap_sau_ha_cap(
-                    provider, task, so_lan
-                )
-                hang = dataclasses.replace(
-                    hang, khop_sau_ha_cap=khop, sai_sau_ha_cap=sai, loi_sau_ha_cap=loi
+            try:
+                hang = await do_mot_cap_tho(provider, task, so_lan)
+                if do_ca_sau_ha_cap:
+                    # Bỏ qua thời gian đo-sau-hạ-cấp: Ket_qua.tong_giay chỉ đo
+                    # lần-đầu, trộn chung hai khoảng thời gian đo hai thứ khác
+                    # nhau vào một cột sẽ làm sai giay_tb báo cáo lần-đầu.
+                    khop, sai, loi, _giay_sau_ha_cap = await do_mot_cap_sau_ha_cap(
+                        provider, task, so_lan
+                    )
+                    hang = dataclasses.replace(
+                        hang, khop_sau_ha_cap=khop, sai_sau_ha_cap=sai, loi_sau_ha_cap=loi
+                    )
+            except FixtureMissing as loi_fixture:
+                # Fixture thiếu ở chế độ replay LUÔN LUÔN là lỗi thao tác
+                # (bộ fixture không đầy đủ), KHÔNG PHẢI một kết quả đo hợp lệ
+                # để âm thầm đếm vào loi_ha_tang rồi tiếp tục — làm vậy sẽ ghi
+                # ra một báo cáo TRÔNG như đã đo đủ trong khi lượt chạy này
+                # thực ra đã hỏng, đúng thứ script này tồn tại để KHÔNG làm
+                # (một con số trông có vẻ đáng tin nhưng không phải vậy). Nêu
+                # rõ provider/tác vụ đang đo dở, dừng CẢ lượt chạy ngay, không
+                # ghi báo cáo nào — qua in_an_toan()/_thoat_an_toan() để
+                # thông điệp còn đọc được trên console Windows cp1252.
+                _thoat_an_toan(
+                    "Thiếu fixture khi phát lại (LLM_FIXTURE_MODE=replay), "
+                    f"đang đo {ten}/{task.value}: {loi_fixture} Đây là lỗi "
+                    "thao tác (bộ fixture không đầy đủ) — dừng lượt chạy, "
+                    "KHÔNG ghi báo cáo. Ghi lại fixture còn thiếu (chế độ "
+                    "record) rồi chạy lại."
                 )
             rows.append(hang)
         await provider.aclose()
