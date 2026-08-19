@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 import fakeredis.aioredis
@@ -266,3 +267,55 @@ async def test_ghi_so_khong_dung_session_cua_caller(redis):
             "Hàng chưa commit của caller đã bị commit lặng lẽ như tác dụng phụ của run() "
             "— run() không được dùng session của caller để ghi sổ."
         )
+
+
+class _FactoryChet:
+    """`session_factory` giả lập một CSDL CHẾT HẲN: chính việc MỞ phiên đã
+    thất bại ở tầng socket, trước khi có phiên nào để sinh `SQLAlchemyError`.
+
+    `record_usage()` không bao giờ được chạy trong trường hợp này, nên bản vá
+    `except (SQLAlchemyError, OSError)` bên trong `ledger.py` KHÔNG che được
+    đường này — nó phải được che ở `LLMService._ghi_so`.
+    """
+
+    def __call__(self):
+        raise ConnectionRefusedError(1225, "khong ket noi duoc tới CSDL")
+
+
+@pytest.mark.asyncio
+async def test_mo_session_ghi_so_that_bai_khong_pha_huy_ket_qua(redis, caplog):
+    """Đường THÀNH CÔNG: token đã tiêu thật và câu trả lời đã có — một CSDL
+    chết ở bước MỞ phiên ghi sổ không được phép biến nó thành lỗi.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: ĐỎ với `ConnectionRefusedError: [Errno 1225]`
+    thoát nguyên vẹn ra khỏi `run()` thay vì trả về `NormalizedGoal`.
+    """
+    service = LLMService(
+        {"gemini": FakeProvider(name="gemini", responses=[_GOAL_JSON])},
+        redis,
+        session_factory=_FactoryChet(),
+    )
+    with caplog.at_level(logging.ERROR):
+        ket_qua = await service.run(uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")
+
+    assert isinstance(ket_qua, NormalizedGoal)
+    assert any(rec.levelno >= logging.ERROR for rec in caplog.records), (
+        "mất dòng sổ phải quan sát được bằng log, không được nuốt lặng lẽ"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mo_session_ghi_so_that_bai_khong_che_lap_loi_that(redis):
+    """Đường THẤT BẠI, và là chiều tệ hơn: lỗi CSDL không được THAY THẾ
+    `AllProvidersFailed`, vì làm vậy che mất nguyên nhân thật khỏi caller.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: ĐỎ — `pytest.raises(AllProvidersFailed)` thất
+    bại vì thứ nổi lên là `ConnectionRefusedError`.
+    """
+    service = LLMService(
+        {"gemini": FakeProvider(name="gemini", responses=["hong", "van hong", "hong nua"])},
+        redis,
+        session_factory=_FactoryChet(),
+    )
+    with pytest.raises(AllProvidersFailed):
+        await service.run(uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")

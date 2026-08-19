@@ -46,6 +46,7 @@ không bao giờ dùng chung thùng "shared" — và khoá API giải mã không
 được đưa vào log, lỗi, sổ token, hay prompt.
 """
 
+import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
@@ -54,6 +55,7 @@ from pathlib import Path
 
 import redis.asyncio as aioredis
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -68,6 +70,8 @@ from app.modules.llm.registry import REGISTRY
 from app.modules.llm.routing import LLMRouter
 from app.modules.llm.schema_util import to_provider_schema
 from app.modules.llm.types import CallSpec, LLMError, TaskType, Usage
+
+_log = logging.getLogger(__name__)
 
 
 def build_providers(settings: Settings) -> dict[str, Provider]:
@@ -241,10 +245,37 @@ class LLMService:
         `commit()`/`rollback()` session này, và vì đây là session KHÔNG
         mang thay đổi nào khác ngoài các dòng sổ đang ghi, hành vi đó không
         còn nguy cơ ảnh hưởng ngoài ý muốn tới bất kỳ ai.
+
+        Toàn bộ khối được bọc `try`: `record_usage()` (ledger.py) chỉ che được
+        lỗi hạ tầng xảy ra BÊN TRONG nó, tức sau khi đã có một session. Việc
+        MỞ session — và việc đóng nó ở cuối `async with` — nằm NGOÀI phạm vi
+        đó, nên khi CSDL chết hẳn, `self._tao_session()` tự ném
+        `ConnectionRefusedError` và lỗi ấy thoát nguyên vẹn qua `run()`. Hậu
+        quả đúng bằng thứ Ruling 3 cấm, ở hai chiều: trên đường THÀNH CÔNG nó
+        phá huỷ một câu trả lời đã tiêu token thật; trên đường THẤT BẠI nó
+        THAY THẾ `AllProvidersFailed`, che mất nguyên nhân thật khỏi caller.
+        Bắt đúng `(SQLAlchemyError, OSError)` — cùng lý do và cùng ranh giới
+        như khối `except` trong `ledger.record_usage()`, xem chú thích ở đó;
+        `ValueError` do dùng sai `record_usage()` vẫn nổ ra bình thường.
         """
-        async with self._tao_session() as session:
-            await _ghi_so_theo_provider(
-                session, user_id, task, usages, nha_cung_cap_thanh_cong=nha_cung_cap_thanh_cong
+        try:
+            async with self._tao_session() as session:
+                await _ghi_so_theo_provider(
+                    session, user_id, task, usages, nha_cung_cap_thanh_cong=nha_cung_cap_thanh_cong
+                )
+        except (SQLAlchemyError, OSError):
+            _log.error(
+                "Không mở/đóng được session ghi sổ token — mất %d bản ghi usage của "
+                "task=%s (không ảnh hưởng hạn mức vì Redis đã trừ token trước khi gọi "
+                "provider, nhưng số liệu báo cáo sẽ THẤP HƠN thực tế): "
+                "provider_thanh_cong=%s user_id=%s tong_input=%d tong_output=%d",
+                len(usages),
+                task.value,
+                nha_cung_cap_thanh_cong,
+                user_id,
+                sum(u.input_tokens for u in usages),
+                sum(u.output_tokens for u in usages),
+                exc_info=True,
             )
 
 

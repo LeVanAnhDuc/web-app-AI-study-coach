@@ -72,6 +72,26 @@ class TokenLedger(Base):
     )
 
 
+async def _rollback_khong_ne_loi(session: AsyncSession) -> None:
+    """Hoàn tác, và KHÔNG BAO GIỜ để việc hoàn tác tự nó ném ra ngoài.
+
+    Khi commit thất bại vì CSDL đã chết, `rollback()` đi lại đúng con đường
+    vừa hỏng và có thể ném cùng một lỗi. Nếu để nó thoát ra, bản sửa
+    `except (SQLAlchemyError, OSError)` ở trên thành vô nghĩa: câu trả lời LLM
+    đã trả tiền vẫn bị phá huỷ, chỉ là bởi dòng dọn dẹp thay vì bởi dòng ghi.
+    Nuốt ở ĐÚNG hai lớp đó (không phải `Exception` trần) rồi để lời gọi
+    `_log.error` phía sau ghi lại đầy đủ số liệu đã mất.
+    """
+    try:
+        await session.rollback()
+    except (SQLAlchemyError, OSError):
+        _log.warning(
+            "rollback() sau khi ghi sổ token thất bại cũng thất bại — CSDL có thể "
+            "đã chết hoàn toàn. Bỏ qua để không phá huỷ kết quả LLM đã thành công.",
+            exc_info=True,
+        )
+
+
 async def record_usage(
     session: AsyncSession,
     user_id: uuid.UUID | None,
@@ -119,8 +139,11 @@ async def record_usage(
     CẢNH BÁO (không raise — raise ở đây sẽ lại huỷ một kết quả LLM đã thành
     công, đúng điều Ruling 3 cấm) để lộ ra lỗi dùng sai của caller.
 
-    Ghi thất bại (CSDL tạm thời không phản hồi) KHÔNG được ném ngoại lệ ra
-    ngoài: tới lúc hàm này chạy, token đã bị tiêu thật (thùng Redis đã trừ
+    Ghi thất bại KHÔNG được ném ngoại lệ ra ngoài — CẢ khi CSDL tạm thời không
+    phản hồi, CẢ khi nó chết hẳn (không lắng nghe cổng nào, tên host không phân
+    giải được). Trường hợp thứ hai KHÔNG sinh ra `SQLAlchemyError` mà sinh ra
+    `OSError` ở tầng socket, nên nó phải được bắt tường minh; xem chú thích tại
+    khối `except` bên dưới. Tới lúc hàm này chạy, token đã bị tiêu thật (thùng Redis đã trừ
     trước khi gọi provider) và câu trả lời cho người dùng đã có sẵn — huỷ nó
     chỉ vì không ghi được một dòng thống kê là biến một lời gọi ĐÃ THÀNH CÔNG
     thành lỗi mà không giúp ích gì. Lỗi vẫn phải được LOG rõ ràng, kèm đủ số
@@ -175,13 +198,27 @@ async def record_usage(
     )
     try:
         await session.commit()
-    except SQLAlchemyError:
-        # Bắt đúng SQLAlchemyError (gốc của mọi lỗi từ driver/CSDL: mất kết
-        # nối, timeout, vi phạm ràng buộc...), không bắt Exception trần —
-        # lỗi lập trình (ví dụ TypeError do gọi sai kiểu) vẫn phải nổ ra bình
-        # thường để bị phát hiện ngay trong test/CI, chỉ lỗi THẬT SỰ đến từ
-        # CSDL mới được coi là "chấp nhận mất một dòng báo cáo".
-        await session.rollback()
+    except (SQLAlchemyError, OSError):
+        # HAI lớp, không một, và KHÔNG phải Exception trần:
+        #
+        # - `SQLAlchemyError` là gốc của mọi lỗi do driver/CSDL BÁO VỀ (lệnh
+        #   thất bại, vi phạm ràng buộc, kết nối bị đóng giữa transaction...).
+        # - `OSError` là gốc của mọi lỗi ở tầng SOCKET, tức khi CSDL không
+        #   BÁO GÌ CẢ vì nó không tồn tại để báo: `ConnectionRefusedError`
+        #   (CSDL chết, không lắng nghe cổng), `TimeoutError` (không phản hồi),
+        #   `socket.gaierror` (tên host không phân giải được) đều là lớp con
+        #   của `OSError` và KHÔNG lớp nào trong số đó là `SQLAlchemyError` —
+        #   chúng xảy ra TRƯỚC khi có một phiên CSDL nào để sinh ra lỗi kiểu
+        #   SQLAlchemy. Thiếu `OSError` ở đây, đúng trường hợp tệ nhất (CSDL
+        #   chết hẳn) là trường hợp DUY NHẤT thoát ra ngoài và phá huỷ một câu
+        #   trả lời LLM đã tiêu token thật — phá đúng lời hứa của docstring
+        #   phía trên.
+        #
+        # KHÔNG mở rộng thành `Exception`: lỗi lập trình (vd `TypeError` do gọi
+        # sai kiểu) vẫn phải nổ ra bình thường để bị phát hiện ngay trong
+        # test/CI. Hai lớp trên phủ trọn "hạ tầng lưu trữ không dùng được" mà
+        # không phủ "mã của chúng ta viết sai".
+        await _rollback_khong_ne_loi(session)
         _log.error(
             "Ghi sổ token thất bại, mất một dòng báo cáo (không ảnh hưởng hạn mức vì "
             "Redis đã trừ token trước khi gọi provider, nhưng số liệu báo cáo sẽ THẤP "

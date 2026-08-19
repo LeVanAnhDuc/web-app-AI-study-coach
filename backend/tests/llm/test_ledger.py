@@ -123,13 +123,37 @@ async def test_ghi_khong_doc_truoc_khi_ghi(db_session):
 
 
 @pytest.mark.asyncio
-async def test_ghi_that_bai_khong_lam_mat_ket_qua_da_thanh_cong(db_session, monkeypatch, caplog):
+@pytest.mark.parametrize(
+    "loi_gia_lap",
+    [
+        # ConnectionRefusedError (CSDL CHẾT HẲN, không lắng nghe cổng nào) là
+        # một OSError, KHÔNG phải SQLAlchemyError — trước bản sửa nó thoát khỏi
+        # `except SQLAlchemyError` và phá huỷ một câu trả lời LLM đã trả tiền.
+        # Đặt TRƯỚC để nó là trường hợp đầu tiên đọc thấy.
+        pytest.param(ConnectionRefusedError(1225, "khong ket noi duoc tới CSDL"), id="os-error"),
+        # OperationalError (CSDL còn sống nhưng lệnh thất bại) là trường hợp
+        # gốc — GIỮ LẠI để cả hai lớp đều bị ghim, không phải thay thế.
+        pytest.param(
+            OperationalError("INSERT INTO token_ledger ...", {}, Exception("mat ket noi")),
+            id="sqlalchemy-error",
+        ),
+    ],
+)
+async def test_ghi_that_bai_khong_lam_mat_ket_qua_da_thanh_cong(
+    db_session, monkeypatch, caplog, loi_gia_lap
+):
     """Ruling 3: CSDL tạm thời không phản hồi khi ghi sổ không được phép ném
     ngoại lệ lên trên — kết quả LLM (đã tốn token thật) không được vì lỗi ghi
     sổ mà biến từ thành công thành thất bại. Nhưng việc mất dòng phải quan sát
     được (log lỗi), không được nuốt lặng lẽ.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: bản cũ của test này CHỈ tiêm `OperationalError`
+    — đúng lớp duy nhất `except SQLAlchemyError` bắt được — nên nó không thể
+    đỏ dù `record_usage()` để lọt mọi lỗi hạ tầng ở tầng socket. Trường hợp
+    `os-error` mới thêm ĐỎ trước khi sửa (ConnectionRefusedError thoát nguyên
+    vẹn ra khỏi `record_usage()`); trường hợp `sqlalchemy-error` vẫn xanh cả
+    trước và sau, và tồn tại để bản sửa không âm thầm đánh mất lớp cũ.
     """
-    loi_gia_lap = OperationalError("INSERT INTO token_ledger ...", {}, Exception("mat ket noi"))
     monkeypatch.setattr(db_session, "commit", AsyncMock(side_effect=loi_gia_lap))
     monkeypatch.setattr(db_session, "rollback", AsyncMock())
 
