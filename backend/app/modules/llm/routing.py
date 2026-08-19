@@ -6,7 +6,10 @@ này dùng đúng cách. Bảy nguyên tắc chi phối vòng lặp bên dưới
 
 1. `RateLimiterUnavailable` (thùng token Redis chết) KHÔNG được coi là tín
    hiệu rơi xuống dự phòng — nó không nằm trong `_DUOC_PHEP_ROI_XUONG`, nên
-   nó tự thoát khỏi vòng lặp `for` và khỏi cả hàm này. Redis dùng CHUNG cho
+   nó nổi lên khỏi vòng lặp `for` và khỏi cả hàm này. Nó ĐI QUA đúng một khối
+   `except LLMError` chỉ để được GẮN usages đã tích luỹ rồi `raise` lại nguyên
+   vẹn (xem chú thích tại khối đó) — gắn-rồi-ném-lại, KHÔNG phải bắt-và-xử-lý,
+   nên tính chất "không rơi xuống dự phòng" giữ nguyên. Redis dùng CHUNG cho
    mọi nhà cung cấp; khi nó chết, thùng của nhà cung cấp kế tiếp cũng chết y
    hệt trong cùng một lượt gọi. Rơi xuống dự phòng ở đây sẽ gọi TỪNG nhà
    cung cấp một cách KHÔNG QUA KIỂM SOÁT hạn mức — đúng cơn dồn dập mà
@@ -122,8 +125,10 @@ PROVIDER_RPM: dict[str, int] = {"gemini": 10, "groq": 25, "mistral": 25}
 
 # Nguyên tắc 1 và 2: CHỈ bốn lớp này được coi là "nhà cung cấp đã từ chối,
 # thử nhà cung cấp kế tiếp". Cố ý KHÔNG có RateLimiterUnavailable — nó là
-# LLMError nhưng KHÔNG nằm trong tuple này nên tự thoát khỏi try/except bên
-# dưới, không bị vòng lặp nuốt.
+# LLMError nhưng KHÔNG nằm trong tuple này, nên nó rơi xuống khối
+# `except LLMError` phía sau, khối đó CHỈ gắn usages rồi `raise` lại: không
+# `continue`, không nuốt, không đổi kiểu. Vòng lặp vẫn không được phép coi nó
+# là tín hiệu rơi xuống dự phòng.
 _DUOC_PHEP_ROI_XUONG: tuple[type[LLMError], ...] = (
     RateLimited,
     QuotaExhausted,
@@ -231,19 +236,17 @@ class LLMRouter:
                 continue
 
             bucket = self._buckets[ten]
-            # Nguyên tắc 6: hỏi thùng TRƯỚC khi gọi nhà cung cấp, không
-            # truyền now_override_for_tests — sản xuất luôn dùng đồng hồ của
-            # máy chủ Redis (xem docstring TokenBucket.try_acquire).
-            # RateLimiterUnavailable từ đây (Redis chết) KHÔNG bị bắt ở bất
-            # kỳ đâu trong hàm này — nó tự thoát ra ngoài (nguyên tắc 1).
-            if not await bucket.try_acquire():
-                # Nguyên tắc 2: hết token trong thùng NỘI BỘ không phải một
-                # LLMError — thùng tách theo từng nhà cung cấp, hết ở đây
-                # không nói gì về nhà cung cấp kế tiếp.
-                da_thu[ten] = "đã chạm hạn mức phía chúng ta (thùng token nội bộ)"
-                continue
-
             try:
+                # Nguyên tắc 6: hỏi thùng TRƯỚC khi gọi nhà cung cấp, không
+                # truyền now_override_for_tests — sản xuất luôn dùng đồng hồ
+                # của máy chủ Redis (xem docstring TokenBucket.try_acquire).
+                if not await bucket.try_acquire():
+                    # Nguyên tắc 2: hết token trong thùng NỘI BỘ không phải
+                    # một LLMError — thùng tách theo từng nhà cung cấp, hết ở
+                    # đây không nói gì về nhà cung cấp kế tiếp.
+                    da_thu[ten] = "đã chạm hạn mức phía chúng ta (thùng token nội bộ)"
+                    continue
+
                 gia_tri, usages_lan_nay = await thuc_hien(provider, spec)
             except _DUOC_PHEP_ROI_XUONG as exc:
                 # Nguyên tắc 4/5: gom usages của lần thử hỏng này (mọi
@@ -254,6 +257,35 @@ class LLMRouter:
                 usages.extend(exc.usages)
                 da_thu[ten] = _mo_ta_that_bai(exc)
                 continue
+            except LLMError as exc:
+                # GẮN RỒI NÉM LẠI, KHÔNG rơi xuống dự phòng — cùng khuôn với
+                # `degrade.py`, nhưng đặt ở CẤP VÒNG LẶP để phủ MỌI LLMError
+                # không-fallthrough, ở BẤT KỲ dòng nào trong thân vòng lặp.
+                #
+                # Vì sao cần: `bucket.try_acquire()` trước đây nằm NGOÀI khối
+                # `try`, nên `RateLimiterUnavailable` (Redis chết GIỮA hai lượt
+                # provider — một tình huống thật, không phải giả thuyết) nổi
+                # lên mang theo `usages == []`, và toàn bộ token đã tiêu thật ở
+                # các provider TRƯỚC đó biến mất khỏi sổ. Nay khối này phủ cả
+                # lời gọi thùng lẫn lời gọi provider, nên `RateLimiterUnavailable`
+                # hôm nay, `FixtureMissing` ở chế độ replay, và bất kỳ lớp nào
+                # thêm về sau đều được gắn usages mà không phải sửa lại chỗ này.
+                #
+                # BA tính chất PHẢI giữ nguyên nếu sửa khối này:
+                # (1) KHÔNG `continue`, KHÔNG nuốt: `RateLimiterUnavailable`
+                #     phải tiếp tục nổi lên và phải tiếp tục KHÔNG gây rơi
+                #     xuống dự phòng (nguyên tắc 1) — rơi xuống khi bộ giới hạn
+                #     DÙNG CHUNG không hỏi được là gọi KHÔNG ĐO ĐẾM lần lượt
+                #     tới từng nhà cung cấp, đúng cơn dồn dập thùng token sinh
+                #     ra để chặn.
+                # (2) `raise` TRẦN, không dựng ngoại lệ mới: giữ nguyên kiểu và
+                #     traceback gốc.
+                # (3) THỨ TỰ `usages + exc.usages`, không phải phép gán và
+                #     không phải thứ tự ngược: usages mà router tích luỹ đi
+                #     TRƯỚC, phần ngoại lệ đã tự mang theo đi SAU — gán thẳng
+                #     sẽ xoá phần thứ hai, đúng lớp lỗi đếm-thiếu của C-52.
+                exc.usages = usages + exc.usages
+                raise
 
             usages.extend(usages_lan_nay)
             return RoutedResult(value=gia_tri, usages=usages, provider=ten)

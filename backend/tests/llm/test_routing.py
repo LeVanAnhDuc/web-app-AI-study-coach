@@ -18,6 +18,7 @@ from app.modules.llm.types import (
     QuotaExhausted,
     RateLimited,
     TaskType,
+    Usage,
 )
 from tests.llm.fakes import FakeProvider
 
@@ -190,6 +191,69 @@ async def test_loi_bo_gioi_han_khong_kha_dung_thi_khong_roi_xuong_du_phong():
         await router.complete_structured(_spec(), ThuNghiem)
     assert a.calls == []
     assert b.calls == []
+
+
+class _ThungChet:
+    """Thùng token mà việc HỎI nó cũng thất bại — Redis chết GIỮA hai lượt thử
+    provider, không phải trước lượt đầu."""
+
+    async def try_acquire(self, tokens: int = 1, **kwargs) -> bool:
+        raise RateLimiterUnavailable("gia lap Redis chet giua vong lap")
+
+
+@pytest.mark.asyncio
+async def test_loi_bo_gioi_han_giua_vong_lap_khong_lam_mat_usages_da_tich_luy(redis):
+    """`bucket.try_acquire()` nằm NGOÀI khối `try` của vòng lặp dự phòng, nên
+    một `RateLimiterUnavailable` từ nó nổi lên mà KHÔNG mang theo `usages` đã
+    tích luỹ từ provider trước — provider "a" đã gọi thật 3 lần, tiêu token
+    thật, và toàn bộ số đó biến mất khỏi sổ.
+
+    Test cũ (`test_loi_bo_gioi_han_khong_kha_dung_thi_khong_roi_xuong_du_phong`)
+    giết Redis TRƯỚC lượt provider đầu tiên (`a.calls == []`), nên không có
+    usage nào để mất — nó không thể đỏ ở lỗ này. Test này giữ Redis SỐNG cho
+    provider 1 và chỉ cho thùng của provider 2 chết.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: ĐỎ — `exc.usages` là `[]` trong khi
+    `len(a.calls) == 3`.
+    """
+    a = FakeProvider(name="a", responses=["khong phai json", "van khong", "hong nua"])
+    b = FakeProvider(name="b", responses=['{"ten": "Binh"}'])
+    router = LLMRouter({"a": a, "b": b}, redis)
+    router._chain = lambda task: ("a", "b")
+    # Redis SỐNG cho "a" (thùng thật), CHẾT cho "b".
+    router._buckets["b"] = _ThungChet()
+
+    with pytest.raises(RateLimiterUnavailable) as exc_info:
+        await router.complete_structured(_spec(), ThuNghiem)
+
+    # Nửa thứ nhất: ngoại lệ vẫn là RateLimiterUnavailable và KHÔNG gây rơi
+    # xuống dự phòng — "b" chưa từng được gọi (nguyên tắc 1).
+    assert b.calls == []
+    # Nửa thứ hai: usage của 3 lượt thử THẬT ở "a" phải sống sót qua ngoại lệ.
+    assert len(a.calls) == 3
+    assert len(exc_info.value.usages) == 3
+    assert {u.provider for u in exc_info.value.usages} == {"a"}
+
+
+@pytest.mark.asyncio
+async def test_usages_da_co_san_tren_ngoai_le_khong_bi_ghi_de(redis):
+    """GHIM THỨ TỰ: bản sửa dùng `usages + exc.usages`, không phải phép gán.
+    Nếu ai đó "dọn gọn" thành `exc.usages = usages`, phần usage mà chính ngoại
+    lệ đã mang theo sẽ bị xoá — đúng lớp lỗi đếm-thiếu mà C-52 đã chống."""
+    usage_co_san = Usage(provider="x", model="x1", input_tokens=1, output_tokens=2)
+    a = FakeProvider(name="a", responses=['{"ten": "An"}'])
+    router = LLMRouter({"a": a}, redis)
+    router._chain = lambda task: ("a",)
+
+    class _ThungChetMangUsage:
+        async def try_acquire(self, tokens: int = 1, **kwargs) -> bool:
+            raise RateLimiterUnavailable("gia lap", usages=[usage_co_san])
+
+    router._buckets["a"] = _ThungChetMangUsage()
+
+    with pytest.raises(RateLimiterUnavailable) as exc_info:
+        await router.complete_structured(_spec(), ThuNghiem)
+    assert exc_info.value.usages == [usage_co_san]
 
 
 # --- Test bổ sung: Ruling 3 — không bao giờ sleep theo retry_after ---
