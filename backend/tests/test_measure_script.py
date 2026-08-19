@@ -17,12 +17,21 @@ import pytest
 from app.config import get_settings
 from app.modules.llm.fixtures import FixtureMissing, FixtureProvider, fixture_key
 from app.modules.llm.registry import REGISTRY
+from app.modules.llm.routing import PROVIDER_RPM
 from app.modules.llm.schema_util import to_provider_schema
 from app.modules.llm.service import build_providers
-from app.modules.llm.types import CallSpec, RateLimited, TaskType
+from app.modules.llm.types import (
+    CallSpec,
+    ProviderUnavailable,
+    RateLimited,
+    TaskType,
+    Usage,
+)
 from scripts.measure_json_compliance import (
     SAMPLES,
     Ket_qua,
+    ProviderGiuNhip,
+    _giay_moi_luot_goi,
     chay,
     do_mot_cap_sau_ha_cap,
     do_mot_cap_tho,
@@ -398,17 +407,21 @@ async def test_do_sau_ha_cap_tinh_ca_luot_thu_lai():
         name="groq",
         responses=['{"domain": "x"}', _GOAL_JSON],
     )
-    khop, sai, loi, giay = await do_mot_cap_sau_ha_cap(provider, TaskType.NORMALIZE_GOAL, so_lan=1)
-    assert (khop, sai, loi) == (1, 0, 0)
-    assert giay >= 0.0
+    ket_qua = await do_mot_cap_sau_ha_cap(provider, TaskType.NORMALIZE_GOAL, so_lan=1)
+    assert (ket_qua.khop, ket_qua.sai, ket_qua.loi) == (1, 0, 0)
+    assert ket_qua.tong_giay >= 0.0
     assert len(provider.calls) == 2
+    # Hai lượt gọi provider (FakeProvider trả 10/20 mỗi lượt) đều tính vào chi
+    # phí — kể cả lượt đầu đã hỏng schema, vì nó đã tiêu token thật.
+    assert ket_qua.token_vao == 20
+    assert ket_qua.token_ra == 40
 
 
 @pytest.mark.asyncio
 async def test_do_sau_ha_cap_dem_loi_ha_tang_rieng_voi_sai_schema():
     provider = FakeProvider(name="groq", errors=[RateLimited("bi chan")])
-    khop, sai, loi, _ = await do_mot_cap_sau_ha_cap(provider, TaskType.NORMALIZE_GOAL, so_lan=1)
-    assert (khop, sai, loi) == (0, 0, 1)
+    ket_qua = await do_mot_cap_sau_ha_cap(provider, TaskType.NORMALIZE_GOAL, so_lan=1)
+    assert (ket_qua.khop, ket_qua.sai, ket_qua.loi) == (0, 0, 1)
 
 
 # --- in_an_toan: không bao giờ crash vì console không hỗ trợ tiếng Việt ---
@@ -634,3 +647,164 @@ async def test_chay_voi_nhieu_provider_gan_dung_hang_cho_tung_nha_cung_cap(tmp_p
             assert len(dong_khop) == 1, (ten_provider, task, noi_dung)
             assert model in dong_khop[0]
             assert model_cua_provider_kia not in dong_khop[0]
+
+
+# --- Giữ nhịp: bảo toàn mọi mẫu, không chặn mẫu nào ---
+
+
+def test_nhip_suy_ra_dung_tu_provider_rpm():
+    """`PROVIDER_RPM["gemini"] = 10` nghĩa là 6 giây một lượt. Ghim phép suy ra
+    này để không ai đổi nó thành một hằng số cứng rồi trôi lệch khỏi bảng."""
+    assert _giay_moi_luot_goi("gemini") == 60.0 / PROVIDER_RPM["gemini"]
+    assert _giay_moi_luot_goi("groq") == 60.0 / PROVIDER_RPM["groq"]
+    # Provider chưa khai trong bảng: đoán THẬN TRỌNG (rpm nhỏ nhất), không phải
+    # đoán 0 rồi gọi không giới hạn.
+    assert _giay_moi_luot_goi("provider-chua-khai") == 60.0 / min(PROVIDER_RPM.values())
+
+
+@pytest.mark.asyncio
+async def test_giu_nhip_nghi_giua_hai_luot_va_khong_lam_mat_mau(monkeypatch):
+    """Hành vi PHẢI có: nghỉ giữa hai lượt gọi tới cùng nhà cung cấp. Hành vi
+    PHẢI KHÔNG có: bỏ mất lượt nào. Đây là khác biệt cốt lõi giữa GIỮ NHỊP và
+    CHẶN — thùng token sẽ TỪ CHỐI lượt thứ hai và biến nó thành "không đo
+    được", tức mất đúng cái mẫu ta đang trả tiền để lấy.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: `provider calls made: 35, bucket consultations:
+    0` — không có bất kỳ khoảng nghỉ nào; `ProviderGiuNhip` chưa tồn tại nên
+    test này còn không import được.
+    """
+    da_ngu: list[float] = []
+
+    async def ngu_gia(giay: float) -> None:
+        da_ngu.append(giay)
+
+    monkeypatch.setattr("scripts.measure_json_compliance.asyncio.sleep", ngu_gia)
+
+    goc = FakeProvider(name="groq", responses=[_GOAL_JSON] * 3)
+    provider = ProviderGiuNhip(goc, giay_moi_luot=6.0)
+    ket_qua = await do_mot_cap_tho(provider, TaskType.NORMALIZE_GOAL, so_lan=3)
+
+    # MỌI mẫu vẫn được đo — giữ nhịp không loại bỏ mẫu nào.
+    assert ket_qua.so_mau == 3
+    assert ket_qua.khop_schema == 3
+    assert len(goc.calls) == 3
+    # Lượt đầu không nghỉ (chưa có lượt trước), hai lượt sau đều nghỉ.
+    assert len(da_ngu) == 2
+    assert all(0 < g <= 6.0 for g in da_ngu), da_ngu
+
+
+@pytest.mark.asyncio
+async def test_giu_nhip_chuyen_tiep_nguyen_ven_thuoc_tinh_dinh_danh():
+    """`degrade.py` đọc `capabilities` để quyết định có tiêm chỉ dẫn JSON hay
+    không, và hai vòng lặp đo đọc `name`/`model` để gán vào dòng báo cáo — bỏ
+    sót một thuộc tính ở lớp bọc sẽ âm thầm đổi CÁI ĐANG ĐƯỢC ĐO."""
+    goc = FakeProvider(name="mistral", model="mistral-x", capabilities=frozenset())
+    provider = ProviderGiuNhip(goc, giay_moi_luot=0.0)
+    assert provider.name == "mistral"
+    assert provider.model == "mistral-x"
+    assert provider.capabilities == goc.capabilities
+    await provider.aclose()
+    assert goc.closed is True
+
+
+@pytest.mark.asyncio
+async def test_che_do_replay_khong_giu_nhip(tmp_path, monkeypatch):
+    """Chạy thử bằng fixture không tiêu hạn mức nào, nên nghỉ 6 giây giữa các
+    lần ĐỌC FILE chỉ làm lượt chạy thử dài vô ích. `chay()` phải tắt giữ nhịp ở
+    chế độ replay — ghim bằng cách khẳng định `asyncio.sleep` không hề được
+    gọi (chính test đầu-cuối bên trên cũng sẽ đứng 35 phút nếu điều này sai)."""
+    da_ngu: list[float] = []
+
+    async def ngu_gia(giay: float) -> None:
+        da_ngu.append(giay)
+
+    monkeypatch.setattr("scripts.measure_json_compliance.asyncio.sleep", ngu_gia)
+
+    thu_muc_fixture = tmp_path / "fixtures"
+    thu_muc_fixture.mkdir()
+    can_do = [t for t, spec in REGISTRY.items() if spec.response_model is not None]
+    for task in can_do:
+        khoa = fixture_key("gemini", "gemini-fake-model", _spec_cho(task))
+        (thu_muc_fixture / f"{khoa}.json").write_text(
+            json.dumps(
+                {
+                    "task": task.value,
+                    "text": _JSON_HOP_LE_THEO_TAC_VU[task],
+                    "usage": {
+                        "provider": "gemini",
+                        "model": "gemini-fake-model",
+                        "input_tokens": 7,
+                        "output_tokens": 3,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    settings = get_settings().model_copy(
+        update={
+            "gemini_api_key": "khoa-gia",
+            "groq_api_key": None,
+            "mistral_api_key": None,
+            "gemini_model": "gemini-fake-model",
+            "llm_fixture_mode": "replay",
+            "llm_fixture_dir": str(thu_muc_fixture),
+        }
+    )
+    duong_dan = await chay(settings, so_lan=2, thu_muc_bao_cao=tmp_path / "bao_cao")
+
+    assert da_ngu == []
+    # Và chi phí vẫn được đếm đúng: 7 tác vụ × 2 mẫu × (7 vào, 3 ra).
+    noi_dung = duong_dan.read_text(encoding="utf-8")
+    assert "Chi phí lượt chạy" in noi_dung
+    # Bảng chi phí có 7 cột; bảng %Khớp phía trên có 10 và cũng bắt đầu bằng
+    # "| gemini |", nên lọc theo số cột để lấy đúng dòng của bảng chi phí.
+    dong_gemini = [
+        [x.strip() for x in d.strip("|").split("|")]
+        for d in noi_dung.splitlines()
+        if d.startswith("| gemini |") and len(d.strip("|").split("|")) == 7
+    ]
+    assert len(dong_gemini) == 1, noi_dung
+    o = dong_gemini[0]
+    assert o[1] == str(len(can_do) * 2)  # lượt gọi lần-đầu
+    assert o[2] == str(len(can_do) * 2 * 7)  # token vào
+    assert o[3] == str(len(can_do) * 2 * 3)  # token ra
+    assert o[6] == str(len(can_do) * 2 * 10)  # tổng token
+
+
+# --- Báo cáo chi phí: lượt hỏng ĐÃ tính tiền cũng phải được đếm ---
+
+
+@pytest.mark.asyncio
+async def test_do_lan_dau_cong_don_token_ke_ca_luot_hong_da_tinh_tien():
+    """Một lượt `ProviderUnavailable` sau HTTP 200 (hết ngân sách output) đã bị
+    tính tiền trọn vẹn và mang theo `usages` — nó phải vào mục chi phí, nếu
+    không báo cáo sẽ thấp hơn thực tế đúng ở những lượt tốn nhất.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: `Ket_qua` không có trường token nào, nên
+    `ket_qua.token_ra` ném `AttributeError`.
+    """
+    usage_da_tinh_tien = Usage(provider="groq", model="fake-1", input_tokens=700, output_tokens=512)
+    provider = FakeProvider(
+        name="groq",
+        errors=[ProviderUnavailable("het ngan sach", usages=[usage_da_tinh_tien]), None],
+        responses=[_GOAL_JSON],
+    )
+    ket_qua = await do_mot_cap_tho(provider, TaskType.NORMALIZE_GOAL, so_lan=2)
+
+    assert ket_qua.loi_ha_tang == 1
+    assert ket_qua.khop_schema == 1
+    # 700 + 10 (FakeProvider trả 10/20 ở lượt thành công), 512 + 20.
+    assert ket_qua.token_vao == 710
+    assert ket_qua.token_ra == 532
+
+
+def test_bao_cao_neu_ro_chi_phi_luot_chay():
+    rows = [
+        Ket_qua("gemini", "m", "generate_quiz", 10, 8, 2, 0, 1.0, token_vao=100, token_ra=200),
+        Ket_qua("groq", "m", "generate_quiz", 10, 8, 2, 0, 1.0, token_vao=1, token_ra=2),
+    ]
+    bao_cao = render_report(rows)
+    assert "Chi phí lượt chạy" in bao_cao
+    assert "300" in bao_cao  # tổng của gemini
+    assert "303" in bao_cao  # tổng chung

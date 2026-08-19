@@ -27,13 +27,49 @@ schema" sẽ đánh giá thấp một provider chỉ vì nó bận, càng dùng 
 đánh giá thấp thêm. Vì vậy `Ket_qua.ti_le_khop` (tỉ lệ khuyến nghị chính)
 chia cho `da_do` (= khop_schema + sai_schema), KHÔNG chia cho `so_mau`.
 
+GIỮ NHỊP (pacing), không phải CHẶN (gating): script này gọi provider LIÊN TIẾP
+`--lan` lần cho MỖI cặp (nhà cung cấp × tác vụ) — mặc định 50 × 7 tác vụ = 350
+lượt mỗi nhà cung cấp, gấp bốn nếu bật --do-ca-sau-ha-cap. Không giữ nhịp thì
+toàn bộ số đó dội vào provider trong vài giây, đâm thẳng vào hạn mức theo phút
+(`PROVIDER_RPM["gemini"] = 10`) và phần lớn ô trong báo cáo sẽ đọc là "chưa đo
+được" SAU KHI hạn mức của ngày đã bị tiêu — kết cục tệ nhất có thể cho đúng
+cái script mà cả mốc này tồn tại để tạo ra. Vì vậy `ProviderGiuNhip` NGHỈ giữa
+hai lượt gọi tới cùng một nhà cung cấp, khoảng nghỉ suy ra từ `PROVIDER_RPM`.
+
+CỐ Ý KHÔNG dùng `TokenBucket` (ratelimit.py) ở đây, dù nó tồn tại và biết đúng
+những con số này. Thùng token TỪ CHỐI khi hết token, còn một lượt bị từ chối ở
+đây sẽ được đếm thành "không đo được" — tức là mất đúng cái mẫu ta đang trả
+tiền để lấy. Giữ nhịp BẢO TOÀN mọi mẫu, chặn thì loại bỏ mẫu. Đây là một trong
+rất ít chỗ mà việc đi vòng qua thùng token là ĐÚNG, và lý do là vì mục đích ở
+đây là ĐO chứ không phải PHỤC VỤ.
+
+Giữ nhịp cũng KHÔNG mâu thuẫn với ruling "đo provider gốc, không đo tầng an
+toàn" ở trên: nó chỉ thêm một khoảng nghỉ giữa các lượt, không đổi prompt,
+không thử lại, không đọc/sửa câu trả lời. Cái được đo không thay đổi.
+
+BÁO CÁO CHI PHÍ: mỗi lượt đo trả về một `Usage` mà trước đây bị bỏ đi. Nay
+tổng token vào/ra được cộng dồn theo từng nhà cung cấp và ghi vào chính file
+báo cáo (mục "Chi phí lượt chạy"), để người vận hành thấy lượt chạy vừa rồi tốn
+bao nhiêu. CỐ Ý không ghi vào sổ token (ledger.py): đây là một script độc lập,
+thêm phụ thuộc CSDL vào nó chỉ để in một con số sẽ làm nó không chạy được ở
+đúng nơi người ta hay chạy nó nhất — một máy chỉ có khoá API.
+
 Chạy thử KHÔNG tốn hạn mức (dùng fixture đã ghi sẵn, xem
 app.modules.llm.fixtures — build_providers() tự bọc FixtureProvider khi
-LLM_FIXTURE_MODE=replay):
-    LLM_FIXTURE_MODE=replay python scripts/measure_json_compliance.py --live --lan 2
+LLM_FIXTURE_MODE=replay). LƯU Ý: `build_providers()` chỉ dựng nhà cung cấp có
+khoá KHÁC RỖNG, nên chế độ replay VẪN CẦN một khoá GIẢ trong môi trường (giá
+trị bất kỳ, không bao giờ được gửi đi đâu vì FixtureProvider đọc từ đĩa) —
+thiếu nó, script thoát với lỗi "chưa có khoá":
+    GEMINI_API_KEY=khoa-gia LLM_FIXTURE_MODE=replay \
+        python scripts/measure_json_compliance.py --live --lan 2
+Chế độ replay KHÔNG giữ nhịp (không có gì để tiết chế), nên chạy thử vẫn nhanh.
 
 Chạy thật (TỐN HẠN MỨC MIỄN PHÍ TRONG NGÀY — cần khoá thật trong .env):
     python scripts/measure_json_compliance.py --live --lan 50
+Ở chế độ này giữ nhịp làm lượt chạy DÀI THẬT (350 lượt ở 10 rpm là khoảng 35
+phút cho riêng Gemini). Đó là đánh đổi có chủ đích: một lượt chạy 35 phút cho
+ra số liệu dùng được thì tốt hơn một lượt chạy 30 giây tiêu hết hạn mức ngày và
+không đo được gì. `chay()` in ước lượng thời gian trước khi bắt đầu.
 
 Không truyền --live thì script không đụng mạng gì cả — chỉ in cảnh báo rồi
 thoát ngay (xem main()).
@@ -55,9 +91,10 @@ from app.modules.llm.degrade import complete_structured, extract_json
 from app.modules.llm.fixtures import FixtureMissing
 from app.modules.llm.providers.base import Provider
 from app.modules.llm.registry import REGISTRY
+from app.modules.llm.routing import PROVIDER_RPM
 from app.modules.llm.schema_util import to_provider_schema
 from app.modules.llm.service import build_providers
-from app.modules.llm.types import CallSpec, LLMError, SchemaViolation, TaskType
+from app.modules.llm.types import CallSpec, LLMError, SchemaViolation, TaskType, Usage
 
 # Prompt mẫu cho từng tác vụ CÓ ép schema (response_model khác None trong
 # REGISTRY). TUTOR_CHAT cố ý KHÔNG có mặt ở đây — nó không ép schema, nên
@@ -102,6 +139,85 @@ SAMPLES: dict[TaskType, str] = {
 # không bao giờ được đọc giống một cell 50 mẫu (xem render_report, ruling 3).
 _MAU_TOI_THIEU_DANG_TIN = 10
 
+# Dùng khi một nhà cung cấp không có mặt trong PROVIDER_RPM. Cố ý chọn giá trị
+# THẤP NHẤT trong bảng hiện tại: một nhà cung cấp chưa khai hạn mức thì đoán
+# THẬN TRỌNG mới đúng chiều — đoán cao sẽ tiêu hạn mức của nó trước khi ai kịp
+# nhận ra là bảng còn thiếu.
+_RPM_MAC_DINH = min(PROVIDER_RPM.values())
+
+
+def _giay_moi_luot_goi(ten_provider: str) -> float:
+    """Khoảng nghỉ TỐI THIỂU giữa hai lượt gọi tới CÙNG một nhà cung cấp, suy
+    ra từ `PROVIDER_RPM` (xem docstring module: giữ nhịp, không chặn).
+
+    `60 / rpm` là nhịp đúng bằng hạn mức, không chậm hơn — bảng `PROVIDER_RPM`
+    đã tự đặt thấp hơn hạn mức công bố để chừa biên an toàn (xem chú thích của
+    nó), nên nhân thêm hệ số ở đây là trừ biên hai lần và làm lượt chạy dài vô
+    ích.
+    """
+    rpm = PROVIDER_RPM.get(ten_provider, _RPM_MAC_DINH)
+    if rpm <= 0:
+        return 0.0
+    return 60.0 / rpm
+
+
+class ProviderGiuNhip:
+    """Bọc một `Provider` để NGHỈ đủ lâu trước mỗi lượt `complete()`.
+
+    Bọc ở tầng `Provider` (không rải `asyncio.sleep` vào hai vòng lặp đo) vì
+    `do_mot_cap_sau_ha_cap` gọi provider GIÁN TIẾP qua `degrade.py`, có thể tới
+    ba lượt cho một "mẫu" — đếm nhịp ở vòng lặp đo sẽ bỏ sót đúng những lượt
+    thử lại đó, tức là bỏ sót phần dồn dập nhất. Ở đây thì mọi lượt gọi thật,
+    dù đi đường nào, cũng phải qua đúng một chỗ.
+
+    Chuyển tiếp NGUYÊN VẸN `name`/`model`/`capabilities`: `degrade.py` đọc
+    `capabilities` để quyết định có tiêm chỉ dẫn JSON hay không, và hai vòng
+    lặp đo đọc `name`/`model` để gán vào dòng báo cáo — một thuộc tính bị bỏ
+    sót ở đây sẽ âm thầm đổi CÁI ĐANG ĐƯỢC ĐO, không chỉ nhịp đo.
+    """
+
+    def __init__(self, goc, giay_moi_luot: float) -> None:
+        self._goc = goc
+        self._giay_moi_luot = giay_moi_luot
+        self._moc_luot_truoc: float | None = None
+
+    @property
+    def name(self) -> str:
+        return self._goc.name
+
+    @property
+    def model(self) -> str:
+        return self._goc.model
+
+    @property
+    def capabilities(self):
+        return self._goc.capabilities
+
+    async def complete(self, spec: CallSpec) -> tuple[str, Usage]:
+        await self._cho_du_nhip()
+        return await self._goc.complete(spec)
+
+    async def _cho_du_nhip(self) -> None:
+        """Nghỉ phần CÒN LẠI của nhịp, tính từ lúc bắt đầu lượt trước.
+
+        Trừ đi thời gian lượt trước đã tốn (thay vì nghỉ trọn `giay_moi_luot`
+        sau mỗi lượt) vì một lượt gọi LLM thật mất vài giây — nghỉ trọn nhịp
+        THÊM vào thời gian đó sẽ làm nhịp thực tế chậm gần gấp đôi hạn mức, và
+        một lượt chạy 35 phút thành hơn một giờ mà không an toàn hơn chút nào.
+        `monotonic()` (không phải `time()`) để việc đổi giờ hệ thống giữa lượt
+        chạy không làm nhịp nhảy.
+        """
+        if self._giay_moi_luot <= 0:
+            return
+        if self._moc_luot_truoc is not None:
+            con_lai = self._giay_moi_luot - (monotonic() - self._moc_luot_truoc)
+            if con_lai > 0:
+                await asyncio.sleep(con_lai)
+        self._moc_luot_truoc = monotonic()
+
+    async def aclose(self) -> None:
+        await self._goc.aclose()
+
 
 def _ngay_hom_nay() -> str:
     """Ngày dùng trong tên file và tiêu đề báo cáo — lấy theo UTC, không dùng
@@ -132,6 +248,19 @@ class Ket_qua:
     khop_sau_ha_cap: int | None = None
     sai_sau_ha_cap: int | None = None
     loi_sau_ha_cap: int | None = None
+    # Token THẬT SỰ đã tiêu cho ô này, lấy từ `Usage` mà provider trả về (và từ
+    # `LLMError.usages` trên các lượt hỏng SAU khi provider đã tính tiền — xem
+    # chú thích trong hai adapter). Tách riêng lần-đầu và sau-hạ-cấp theo đúng
+    # nguyên tắc của ba trường đếm ở trên: hai phép đo khác nhau, không gộp.
+    token_vao: int = 0
+    token_ra: int = 0
+    token_vao_sau_ha_cap: int = 0
+    token_ra_sau_ha_cap: int = 0
+
+    @property
+    def tong_token(self) -> int:
+        """Tổng token của CẢ hai phép đo — con số "lượt chạy này tốn bao nhiêu"."""
+        return self.token_vao + self.token_ra + self.token_vao_sau_ha_cap + self.token_ra_sau_ha_cap
 
     @property
     def da_do(self) -> int:
@@ -213,18 +342,28 @@ async def do_mot_cap_tho(provider: Provider, task: TaskType, so_lan: int) -> Ket
 
     khop = sai = loi = 0
     tong_giay = 0.0
+    token_vao = token_ra = 0
 
     for _ in range(so_lan):
         bat_dau = monotonic()
         try:
-            text, _usage = await provider.complete(call)
+            text, usage = await provider.complete(call)
         except FixtureMissing:
             raise
-        except LLMError:
+        except LLMError as loi_ha_tang_that:
             loi += 1
+            # Một lỗi hạ tầng vẫn có thể ĐÃ tiêu token: mọi chỗ ném SAU một
+            # HTTP 200 trong hai adapter đều mang usages (finishReason
+            # MAX_TOKENS/length đã tiêu TRỌN ngân sách output; prompt bị chặn
+            # vẫn tiêu trọn token prompt). Bỏ qua chúng ở đây sẽ làm mục chi phí
+            # của báo cáo thấp hơn thực tế đúng ở những lượt tốn nhất.
+            token_vao += sum(u.input_tokens for u in loi_ha_tang_that.usages)
+            token_ra += sum(u.output_tokens for u in loi_ha_tang_that.usages)
             tong_giay += monotonic() - bat_dau
             continue
         tong_giay += monotonic() - bat_dau
+        token_vao += usage.input_tokens
+        token_ra += usage.output_tokens
 
         try:
             model_cls.model_validate_json(extract_json(text))
@@ -241,12 +380,29 @@ async def do_mot_cap_tho(provider: Provider, task: TaskType, so_lan: int) -> Ket
         sai_schema=sai,
         loi_ha_tang=loi,
         tong_giay=tong_giay,
+        token_vao=token_vao,
+        token_ra=token_ra,
     )
 
 
-async def do_mot_cap_sau_ha_cap(
-    provider: Provider, task: TaskType, so_lan: int
-) -> tuple[int, int, int, float]:
+@dataclass
+class KetQuaSauHaCap:
+    """Kết quả phép đo THỨ HAI (sau tầng hạ cấp) cho một cặp.
+
+    Là một dataclass, không phải tuple: phép đo này giờ trả về SÁU giá trị, và
+    một tuple sáu phần tử ở nơi gọi (`khop, sai, loi, giay, vao, ra = ...`) chỉ
+    cần đảo hai vị trí là ghi sai số liệu mà không có lỗi nào báo.
+    """
+
+    khop: int
+    sai: int
+    loi: int
+    tong_giay: float
+    token_vao: int
+    token_ra: int
+
+
+async def do_mot_cap_sau_ha_cap(provider: Provider, task: TaskType, so_lan: int) -> KetQuaSauHaCap:
     """Đo con số THỨ HAI, RIÊNG với `do_mot_cap_tho`: tỉ lệ thành công SAU
     KHI đi qua toàn bộ tầng hạ cấp (degrade.py — ép + kiểm + tối đa 2 lần
     thử lại, có tiêm chỉ dẫn JSON cho provider không ép schema gốc). Một
@@ -266,21 +422,41 @@ async def do_mot_cap_sau_ha_cap(
 
     khop = sai = loi = 0
     tong_giay = 0.0
+    token_vao = token_ra = 0
+
+    def _cong_don(usages: list[Usage]) -> None:
+        nonlocal token_vao, token_ra
+        token_vao += sum(u.input_tokens for u in usages)
+        token_ra += sum(u.output_tokens for u in usages)
 
     for _ in range(so_lan):
         bat_dau = monotonic()
         try:
-            await complete_structured(provider, call, model_cls)
+            _gia_tri, usages = await complete_structured(provider, call, model_cls)
             khop += 1
-        except SchemaViolation:
-            sai += 1
+            _cong_don(usages)
         except FixtureMissing:
             raise
-        except LLMError:
+        except SchemaViolation as loi_schema:
+            sai += 1
+            # `SchemaViolation` mang usages của MỌI lượt thử đã hỏng (C-51) —
+            # một "mẫu" thất bại ở đây tốn tới ba lượt gọi thật, đúng phần đắt
+            # nhất của lượt chạy. Bỏ qua nó là báo cáo chi phí thấp hơn thực tế
+            # ở chỗ nó lệch nhiều nhất.
+            _cong_don(loi_schema.usages)
+        except LLMError as loi_ha_tang_that:
             loi += 1
+            _cong_don(loi_ha_tang_that.usages)
         tong_giay += monotonic() - bat_dau
 
-    return khop, sai, loi, tong_giay
+    return KetQuaSauHaCap(
+        khop=khop,
+        sai=sai,
+        loi=loi,
+        tong_giay=tong_giay,
+        token_vao=token_vao,
+        token_ra=token_ra,
+    )
 
 
 def in_an_toan(dong: str, stream=None) -> None:
@@ -305,6 +481,57 @@ def in_an_toan(dong: str, stream=None) -> None:
 
 def _dinh_dang_ti_le(r: Ket_qua) -> str:
     return "chưa đo được" if r.da_do == 0 else f"{r.ti_le_khop:.0f}%"
+
+
+def _muc_chi_phi(rows: list[Ket_qua]) -> list[str]:
+    """Mục "Chi phí lượt chạy": tổng token đã tiêu, cộng dồn theo TỪNG nhà cung
+    cấp.
+
+    Đây là câu trả lời cho câu hỏi mà người vận hành sẽ hỏi ngay sau khi chạy —
+    "vừa rồi tốn bao nhiêu hạn mức của hôm nay?" — và trước bản sửa này script
+    không trả lời được: `Usage` mà provider trả về bị bỏ đi ngay tại chỗ nhận.
+    Ghi vào FILE BÁO CÁO chứ không vào sổ token (ledger.py): script này phải
+    chạy được trên một máy chỉ có khoá API, không có CSDL.
+
+    Tách cột lần-đầu và sau-hạ-cấp theo đúng nguyên tắc của bảng %Khớp: hai
+    phép đo khác nhau, và chỉ cột thứ hai thay đổi khi bật --do-ca-sau-ha-cap.
+    """
+    theo_provider: dict[str, list[Ket_qua]] = {}
+    for r in rows:
+        theo_provider.setdefault(r.provider, []).append(r)
+    if not theo_provider:
+        return []
+
+    dong = [
+        "",
+        "## Chi phí lượt chạy",
+        "",
+        (
+            "Token THẬT SỰ đã tiêu, gồm cả các lượt hỏng SAU khi nhà cung cấp đã "
+            "tính tiền (hết ngân sách output, prompt bị chặn, sai schema ở mọi lượt "
+            "thử lại). Đây là số liệu ĐO ĐƯỢC từ phản hồi của nhà cung cấp, không "
+            "phải ước lượng. Cột *sau hạ cấp* chỉ khác 0 khi chạy với "
+            "`--do-ca-sau-ha-cap`."
+        ),
+        "",
+        (
+            "| Nhà cung cấp | Lượt gọi (lần-đầu) | Token vào | Token ra "
+            "| Token vào (sau hạ cấp) | Token ra (sau hạ cấp) | Tổng token |"
+        ),
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    tong_chung = 0
+    for ten, nhom in sorted(theo_provider.items()):
+        tong_chung += sum(r.tong_token for r in nhom)
+        dong.append(
+            f"| {ten} | {sum(r.so_mau for r in nhom)} "
+            f"| {sum(r.token_vao for r in nhom)} | {sum(r.token_ra for r in nhom)} "
+            f"| {sum(r.token_vao_sau_ha_cap for r in nhom)} "
+            f"| {sum(r.token_ra_sau_ha_cap for r in nhom)} "
+            f"| {sum(r.tong_token for r in nhom)} |"
+        )
+    dong.append(f"| **tất cả** | | | | | | **{tong_chung}** |")
+    return dong
 
 
 def render_report(rows: list[Ket_qua]) -> str:
@@ -364,6 +591,8 @@ def render_report(rows: list[Ket_qua]) -> str:
             hien_thi_sau = "chưa đo được" if ti_le_sau is None else f"{ti_le_sau:.0f}%"
             dong.append(f"| {r.provider} | {r.task} | {_dinh_dang_ti_le(r)} | {hien_thi_sau} |")
 
+    dong += _muc_chi_phi(rows)
+
     dong += ["", "## Khuyến nghị định tuyến", ""]
     theo_task: dict[str, list[Ket_qua]] = {}
     for r in rows:
@@ -412,10 +641,21 @@ async def chay(
     if not providers:
         raise SystemExit(
             "Chưa có khoá của nhà cung cấp nào. Đặt GEMINI_API_KEY, "
-            "GROQ_API_KEY, hoặc MISTRAL_API_KEY trong .env — hoặc đặt "
-            "LLM_FIXTURE_MODE=replay với fixture đã ghi sẵn để chạy thử "
-            "không tốn hạn mức."
+            "GROQ_API_KEY, hoặc MISTRAL_API_KEY trong .env. "
+            "LƯU Ý cho chế độ chạy thử: LLM_FIXTURE_MODE=replay VẪN CẦN một "
+            "trong ba biến đó được đặt một giá trị GIẢ khác rỗng (ví dụ "
+            "GEMINI_API_KEY=khoa-gia) — build_providers() chỉ dựng nhà cung cấp "
+            "có khoá khác rỗng, và ở chế độ replay khoá đó không bao giờ được "
+            "gửi đi đâu vì mọi phản hồi đọc từ fixture trên đĩa."
         )
+
+    # GIỮ NHỊP, không CHẶN (xem docstring module). Chế độ replay KHÔNG giữ nhịp:
+    # không có lượt gọi mạng nào để tiết chế, và nghỉ 6 giây giữa các lần đọc
+    # file sẽ làm một lượt chạy thử 350 mẫu mất 35 phút mà không bảo vệ gì cả.
+    # Chế độ "record" thì CÓ gọi thật, nên vẫn phải giữ nhịp như chạy thường.
+    khong_giu_nhip = settings.llm_fixture_mode == "replay"
+    nhip = {ten: (0.0 if khong_giu_nhip else _giay_moi_luot_goi(ten)) for ten in providers}
+    providers = {ten: ProviderGiuNhip(p, nhip[ten]) for ten, p in providers.items()}
 
     in_an_toan(
         "CẢNH BÁO: các lượt gọi tiếp theo tiêu hạn mức miễn phí dùng chung "
@@ -424,6 +664,23 @@ async def chay(
     )
 
     can_do = [t for t, spec in REGISTRY.items() if spec.response_model is not None]
+
+    if khong_giu_nhip:
+        in_an_toan("Chế độ replay: KHÔNG giữ nhịp (không có lượt gọi mạng nào).")
+    else:
+        # In ước lượng TRƯỚC khi bắt đầu: giữ nhịp làm lượt chạy dài thật, và
+        # người vận hành cần biết điều đó lúc còn kịp bấm Ctrl-C, không phải sau
+        # 35 phút. Ước lượng chỉ tính thời gian NGHỈ (thời gian chờ provider trả
+        # lời cộng thêm vào, nên đây là giới hạn DƯỚI) và nêu rõ như vậy.
+        for ten in providers:
+            so_luot = so_lan * len(can_do) * (2 if do_ca_sau_ha_cap else 1)
+            phut = so_luot * nhip[ten] / 60
+            in_an_toan(
+                f"Giữ nhịp {ten}: {nhip[ten]:.1f}s/lượt (từ PROVIDER_RPM="
+                f"{PROVIDER_RPM.get(ten, _RPM_MAC_DINH)}) — ít nhất ~{phut:.0f} phút "
+                f"cho khoảng {so_luot} lượt."
+            )
+
     rows: list[Ket_qua] = []
 
     for ten, provider in providers.items():
@@ -432,14 +689,20 @@ async def chay(
             try:
                 hang = await do_mot_cap_tho(provider, task, so_lan)
                 if do_ca_sau_ha_cap:
-                    # Bỏ qua thời gian đo-sau-hạ-cấp: Ket_qua.tong_giay chỉ đo
-                    # lần-đầu, trộn chung hai khoảng thời gian đo hai thứ khác
-                    # nhau vào một cột sẽ làm sai giay_tb báo cáo lần-đầu.
-                    khop, sai, loi, _giay_sau_ha_cap = await do_mot_cap_sau_ha_cap(
-                        provider, task, so_lan
-                    )
+                    # Bỏ qua thời gian đo-sau-hạ-cấp (`sau.tong_giay`):
+                    # Ket_qua.tong_giay chỉ đo lần-đầu, trộn chung hai khoảng
+                    # thời gian đo hai thứ khác nhau vào một cột sẽ làm sai
+                    # giay_tb báo cáo lần-đầu. Nhưng TOKEN thì phải cộng vào —
+                    # nó là chi phí thật của lượt chạy, không phải một phép đo
+                    # cạnh tranh với phép đo lần-đầu.
+                    sau = await do_mot_cap_sau_ha_cap(provider, task, so_lan)
                     hang = dataclasses.replace(
-                        hang, khop_sau_ha_cap=khop, sai_sau_ha_cap=sai, loi_sau_ha_cap=loi
+                        hang,
+                        khop_sau_ha_cap=sau.khop,
+                        sai_sau_ha_cap=sau.sai,
+                        loi_sau_ha_cap=sau.loi,
+                        token_vao_sau_ha_cap=sau.token_vao,
+                        token_ra_sau_ha_cap=sau.token_ra,
                     )
             except FixtureMissing as loi_fixture:
                 # Fixture thiếu ở chế độ replay LUÔN LUÔN là lỗi thao tác
