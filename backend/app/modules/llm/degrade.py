@@ -119,14 +119,34 @@ async def complete_structured(
             text, usage = await provider.complete(hien_tai)
         except (RateLimited, QuotaExhausted, ProviderUnavailable) as exc:
             # GẮN RỒI NÉM LẠI, KHÔNG RETRY: khối này không có continue, không
-            # gọi lại provider — nó chỉ gắn usages đã tích luỹ từ các lần thử
-            # TRƯỚC (đã tốn token thật, vì provider ĐÃ trả lời ở các lần đó,
-            # chỉ là trả lời sai schema) vào chính ngoại lệ, rồi để nó thoát
-            # ra NGAY, y hệt trước khi có khối try này. Thiếu bước gắn usages
-            # sẽ làm mất usage của các lần thử trước khi ngoại lệ hạ tầng này
-            # nổi lên — cùng lỗi dữ liệu mà việc gắn usages vào SchemaViolation
-            # bên dưới xử lý cho nhánh "hết lượt retry".
-            exc.usages = usages
+            # gọi lại provider — nó chỉ gắn usages vào chính ngoại lệ rồi để nó
+            # thoát ra NGAY, y hệt trước khi có khối try này.
+            #
+            # PHÉP CỘNG, KHÔNG PHẢI PHÉP GÁN — và đây là chỗ dễ "dọn gọn" thành
+            # sai nhất trong file này, vì có HAI nguồn usage khác nhau cùng đổ
+            # về một dòng:
+            #   (a) `usages` — các lần thử TRƯỚC trong chính vòng lặp này: đã
+            #       tốn token thật, vì provider ĐÃ trả lời ở các lần đó, chỉ là
+            #       trả lời sai schema. Thiếu chúng là đúng lỗi dữ liệu mà việc
+            #       gắn usages vào SchemaViolation bên dưới xử lý cho nhánh
+            #       "hết lượt retry".
+            #   (b) `exc.usages` — usage mà CHÍNH ADAPTER đã gắn TẠI CHỖ NÉM.
+            #       Mọi chỗ ném sau một HTTP 200 (finishReason MAX_TOKENS /
+            #       finish_reason "length" đã tiêu TRỌN ngân sách output; prompt
+            #       bị chặn vẫn tiêu trọn token prompt; không có candidate) đều
+            #       kèm `usages=[usage]` — xem chú thích trong gemini.py và
+            #       openai_compat.py.
+            # Một phép GÁN THẲNG (`exc.usages = usages`) xoá sạch (b) và thay
+            # bằng (a) — mà (a) RỖNG ở lần thử ĐẦU TIÊN, đúng lúc (b) hay xuất
+            # hiện nhất. Hậu quả đã đo: một phản hồi MAX_TOKENS (800 vào, 512
+            # ra) đi qua LLMService.run() cho một tác vụ ép schema ném
+            # AllProvidersFailed với usages rỗng và KHÔNG ghi dòng sổ nào. Phép
+            # gán từng vô hại vì hồi nó được viết, adapter chưa gắn gì cả — nó
+            # trở thành mất dữ liệu thật ngay khi adapter bắt đầu gắn.
+            #
+            # THỨ TỰ cũng phải giữ: tích luỹ trước, phần ngoại lệ tự mang sau —
+            # giống routing.py, để không có gì bị bỏ hay bị đếm hai lần.
+            exc.usages = usages + exc.usages
             raise
         usages.append(usage)
 

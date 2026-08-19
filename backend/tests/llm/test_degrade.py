@@ -5,7 +5,16 @@ from app.modules.llm.degrade import complete_structured, extract_json
 from app.modules.llm.providers.gemini import GeminiProvider
 from app.modules.llm.providers.groq import GroqProvider
 from app.modules.llm.providers.mistral import MistralProvider
-from app.modules.llm.types import CallSpec, Capability, RateLimited, SchemaViolation, TaskType
+from app.modules.llm.types import (
+    CallSpec,
+    Capability,
+    ProviderUnavailable,
+    QuotaExhausted,
+    RateLimited,
+    SchemaViolation,
+    TaskType,
+    Usage,
+)
 from tests.llm.fakes import FakeProvider
 
 
@@ -142,6 +151,48 @@ async def test_loi_ha_tang_giua_chung_khong_bi_thu_lai_nhung_van_mang_usage_da_t
         await complete_structured(provider, _spec(), ThuNghiem)
     assert len(provider.calls) == 2
     assert len(exc_info.value.usages) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lop_loi",
+    [RateLimited, QuotaExhausted, ProviderUnavailable],
+)
+async def test_usage_gan_tai_cho_nem_cua_adapter_khong_bi_ghi_de(lop_loi):
+    """Ngoại lệ hạ tầng có thể ĐÃ MANG usages do CHÍNH ADAPTER gắn tại chỗ ném:
+    mọi chỗ ném sau một HTTP 200 (finishReason MAX_TOKENS/length, prompt bị
+    chặn, không có candidate) đều đã bị nhà cung cấp tính tiền trọn vẹn và đều
+    kèm `usages=[usage]`. Một phép GÁN THẲNG ở đây (`exc.usages = usages`) sẽ
+    xoá đúng phần đó và thay bằng bộ tích luỹ của các lần thử TRƯỚC — bộ tích
+    luỹ vốn RỖNG ở lần thử đầu tiên, mà lần thử đầu tiên chính là trường hợp
+    hay gặp nhất.
+
+    Ghim CẢ HAI nửa cùng lúc: usage của lần thử trước (đã sai schema, đã tốn
+    token) VÀ usage mà adapter tự gắn — theo đúng thứ tự `usages + exc.usages`.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA: ĐỎ trên cả ba lớp lỗi —
+    `assert 1 == 2` (chỉ còn lại usage của lần thử trước, phần adapter gắn bị
+    xoá). Test cũ ở trên không thể đỏ vì nó ném `RateLimited("qua tai")` KHÔNG
+    kèm usages, nên phép gán ghi `[usage lần 1]` lên `[]` và trông như đúng.
+    """
+    usage_adapter_gan = Usage(provider="fake", model="fake-1", input_tokens=800, output_tokens=512)
+    provider = FakeProvider(
+        responses=["hong"],
+        errors=[None, lop_loi("het ngan sach", usages=[usage_adapter_gan])],
+    )
+
+    with pytest.raises(lop_loi) as exc_info:
+        await complete_structured(provider, _spec(), ThuNghiem)
+
+    # Vẫn KHÔNG thử lại lỗi hạ tầng: đúng 2 lượt gọi, không có lượt 3.
+    assert len(provider.calls) == 2
+    usages = exc_info.value.usages
+    assert len(usages) == 2, usages
+    # Thứ tự: usage tích luỹ của router/degrade đi TRƯỚC, phần ngoại lệ tự mang
+    # đi SAU — giống routing.py, để không có gì bị bỏ hay bị đếm hai lần.
+    assert usages[0].output_tokens == 20  # lần thử 1 (FakeProvider trả 10/20)
+    assert usages[1] is usage_adapter_gan
+    assert sum(u.output_tokens for u in usages) == 532
 
 
 def test_gemini_that_khai_bao_structured_output():

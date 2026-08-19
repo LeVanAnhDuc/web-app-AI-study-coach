@@ -2,6 +2,7 @@ import logging
 import uuid
 
 import fakeredis.aioredis
+import httpx
 import pytest
 from sqlalchemy import select
 
@@ -319,3 +320,61 @@ async def test_mo_session_ghi_so_that_bai_khong_che_lap_loi_that(redis):
     )
     with pytest.raises(AllProvidersFailed):
         await service.run(uuid.uuid4(), TaskType.NORMALIZE_GOAL, "hoc React")
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_cua_adapter_that_van_ghi_duoc_dong_so(db_session, redis):
+    """ĐẦU-CUỐI, adapter THẬT: một phản hồi HTTP 200 với
+    `finishReason=MAX_TOKENS` (đã tiêu TRỌN ngân sách output) đi qua
+    `GeminiProvider` thật → `degrade.py` → `LLMRouter` → `LLMService.run()`, và
+    phải để lại MỘT DÒNG SỔ mang đúng 800/512.
+
+    Vì sao test này tồn tại chứ không chỉ khẳng định trên `exc.usages`: chuỗi
+    này có BA chỗ có thể đánh rơi usage (chỗ ném của adapter, khối `except` của
+    `degrade.py`, khối `except` của `routing.py`), và một khẳng định ở tầng giữa
+    vẫn xanh dù tầng dưới nó đã xoá dữ liệu. Dòng sổ mới là thứ thật sự quan
+    trọng — nó là thứ duy nhất còn lại sau khi lượt gọi kết thúc.
+
+    ĐÃ QUAN SÁT TRƯỚC KHI SỬA `degrade.py`: `AllProvidersFailed` nổi lên với
+    `usages == []` và KHÔNG có dòng sổ nào (`row is None`) — dù adapter đã gắn
+    usage đúng tại chỗ ném, vì `exc.usages = usages` trong `degrade.py` ghi đè
+    nó bằng bộ tích luỹ RỖNG của lần thử đầu.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": '{"domain": "we'}]},
+                        "finishReason": "MAX_TOKENS",
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 800, "candidatesTokenCount": 512},
+            },
+        )
+
+    gemini = GeminiProvider(api_key="khoa-gia", model="gemini-e2e")
+    gemini._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    user_id = uuid.uuid4()
+    service = LLMService({"gemini": gemini}, redis)
+
+    try:
+        with pytest.raises(AllProvidersFailed) as exc_info:
+            await service.run(user_id, TaskType.NORMALIZE_GOAL, "hoc React")
+    finally:
+        await gemini.aclose()
+
+    # Nửa thứ nhất: usage sống sót qua CẢ ba tầng.
+    assert [u.output_tokens for u in exc_info.value.usages] == [512]
+
+    # Nửa thứ hai, và là nửa thật sự quan trọng: dòng sổ có thật trong CSDL.
+    row = await db_session.scalar(select(TokenLedger).where(TokenLedger.user_id == user_id))
+    assert row is not None, "MAX_TOKENS đã tiêu trọn ngân sách output mà không ghi dòng sổ nào"
+    assert row.provider == "gemini"
+    assert row.model == "gemini-e2e"
+    assert row.input_tokens == 800
+    assert row.output_tokens == 512
+    assert row.attempts == 1
+    assert row.succeeded is False
