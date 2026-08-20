@@ -1,4 +1,4 @@
-# AI Study Coach (app-AI-study-coach)
+# AI Study Coach (web-app-AI-study-coach)
 
 A personalised AI study tutor: it generates a learning path, teaches it, grades answers and adjusts the plan. Python 3.12 / FastAPI backend (async SQLAlchemy on Postgres 16, Redis 7, Alembic, argon2 + JWT auth) with a Next.js 16 / React 19 / TypeScript frontend acting as a BFF; LLM content comes from the Gemini, Groq and Mistral free tiers behind an in-house routing layer.
 
