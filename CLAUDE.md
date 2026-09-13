@@ -16,11 +16,11 @@ pytest -q                      # 301 tests; needs a real Postgres, DB name must 
 ruff check .                   # lint — real config is backend/pyproject.toml
 ruff format .                  # format
 
-npm install                    # frontend/
-npm run dev                    # Next.js dev server on :3000
-npm run build
-npm run lint                   # eslint
-npx tsc --noEmit               # typecheck (there is no backend type checker configured)
+pnpm install                   # frontend/
+pnpm dev                       # Next.js dev server on :3000
+pnpm build
+pnpm lint                      # eslint
+pnpm exec tsc --noEmit         # typecheck (there is no backend type checker configured)
 ```
 
 ## README (REQUIRED — keep in sync with features)

@@ -133,11 +133,11 @@ without that check a misconfiguration would quietly weaken encryption forever.
 Frontend, from `frontend/`:
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env.local   # BACKEND_URL=http://localhost:8000
-npm run dev                  # :3000
-npm run lint
-npx tsc --noEmit
+pnpm dev                     # :3000
+pnpm lint
+pnpm exec tsc --noEmit
 ```
 
 Two things worth knowing before running commands: run `ruff` from `backend/`
