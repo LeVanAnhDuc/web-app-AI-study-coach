@@ -55,9 +55,9 @@ Không cấu hình cũng chạy được (BYOK chưa bật), nhưng cấu hình 
 
 ```bash
 cd frontend
-npm install
+pnpm install
 cp .env.example .env.local     # BACKEND_URL=http://localhost:8000
-npm run dev
+pnpm dev
 ```
 
 ### Lưu ý khi chạy lệnh
