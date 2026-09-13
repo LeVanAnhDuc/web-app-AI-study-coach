@@ -1434,7 +1434,7 @@ git commit -m "feat: refresh token có xoay vòng, chỉ lưu bản băm"
 
 ```bash
 cd "D:/DeleteByDuc/app-AI-study-coach"
-npx create-next-app@latest frontend --typescript --app --eslint --no-tailwind --no-src-dir --import-alias "@/*"
+pnpm dlx create-next-app@latest frontend --typescript --app --eslint --no-tailwind --no-src-dir --import-alias "@/*" --use-pnpm
 ```
 
 Khi được hỏi về Turbopack, chọn mặc định.
@@ -1738,7 +1738,7 @@ Mở hai cửa sổ terminal:
 cd backend && source .venv/Scripts/activate && alembic upgrade head && uvicorn app.main:app --reload --port 8000
 
 # terminal 2
-cd frontend && npm run dev
+cd frontend && pnpm dev
 ```
 
 Mở `http://localhost:3000` rồi làm đủ chuỗi sau:
